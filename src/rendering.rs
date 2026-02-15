@@ -51,6 +51,8 @@ impl Renderer {
             Event::Rule => self.render_rule(),
             Event::Start(block) => self.render_block_start(block),
             Event::End(block) => self.render_block_end(block),
+            Event::StrongStart => self.render_bold_start(),
+            Event::StrongEnd => self.render_bold_end(),
         }
     }
 
@@ -85,6 +87,18 @@ impl Renderer {
             self.current_line.push(' ');
             self.cursor_col += 1;
         }
+    }
+
+    /// Render bold text start (ANSI bold on)
+    fn render_bold_start(&mut self) {
+        self.current_line.push_str("\x1b[1m");
+        // Track escape sequence length for cursor position
+        // \x1b[1m is 4 characters but doesn't count toward visible width
+    }
+
+    /// Render bold text end (ANSI bold off)
+    fn render_bold_end(&mut self) {
+        self.current_line.push_str("\x1b[0m");
     }
 
     /// Render a hard line break

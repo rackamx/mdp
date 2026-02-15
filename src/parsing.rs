@@ -15,6 +15,10 @@ pub enum Event {
     HardBreak,
     /// Horizontal rule
     Rule,
+    /// Start of strong emphasis (bold)
+    StrongStart,
+    /// End of strong emphasis (bold)
+    StrongEnd,
 }
 
 /// Block elements in markdown
@@ -41,8 +45,18 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
 
 fn convert_event(event: MdEvent) -> Event {
     match event {
-        MdEvent::Start(tag) => Event::Start(convert_tag(tag)),
-        MdEvent::End(tag) => Event::End(convert_tag_end(tag)),
+        MdEvent::Start(tag) => {
+            match tag {
+                Tag::Strong => Event::StrongStart,
+                _ => Event::Start(convert_tag(tag)),
+            }
+        }
+        MdEvent::End(tag) => {
+            match tag {
+                TagEnd::Strong => Event::StrongEnd,
+                _ => Event::End(convert_tag_end(tag)),
+            }
+        }
         MdEvent::Text(text) => Event::Text(text.to_string()),
         MdEvent::SoftBreak => Event::SoftBreak,
         MdEvent::HardBreak => Event::HardBreak,

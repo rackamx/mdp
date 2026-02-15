@@ -102,6 +102,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_bold_underscores()` - render `__bold__`, verify ANSI codes
   - `test_render_bold_mixed()` - render "normal **bold** normal", verify structure
 
+**Status**: DONE
+
 ---
 
 ### T06b - Italics Text Rendering

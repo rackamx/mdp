@@ -56,3 +56,61 @@ fn test_render_multiple_lines() {
     assert!(line_count >= 3,
             "Expected at least 3 lines, got: {}", line_count);
 }
+
+/// Test bold text rendering with asterisks (**bold**)
+#[test]
+fn test_render_bold_asterisks() {
+    let markdown = "**bold**";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain ANSI bold codes
+    assert!(output.contains("\x1b[1m"),
+            "Expected bold on code \\x1b[1m in output, got: {:?}", output);
+    assert!(output.contains("\x1b[0m"),
+            "Expected bold off code \\x1b[0m in output, got: {:?}", output);
+    assert!(output.contains("bold"),
+            "Expected 'bold' text in output, got: {:?}", output);
+}
+
+/// Test bold text rendering with underscores (__bold__)
+#[test]
+fn test_render_bold_underscores() {
+    let markdown = "__bold__";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain ANSI bold codes
+    assert!(output.contains("\x1b[1m"),
+            "Expected bold on code \\x1b[1m in output, got: {:?}", output);
+    assert!(output.contains("\x1b[0m"),
+            "Expected bold off code \\x1b[0m in output, got: {:?}", output);
+    assert!(output.contains("bold"),
+            "Expected 'bold' text in output, got: {:?}", output);
+}
+
+/// Test mixed normal and bold text
+#[test]
+fn test_render_bold_mixed() {
+    let markdown = "normal **bold** normal";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain normal text
+    assert!(output.contains("normal"),
+            "Expected 'normal' text in output, got: {:?}", output);
+    // Should contain bold text
+    assert!(output.contains("bold"),
+            "Expected 'bold' text in output, got: {:?}", output);
+    // Should contain bold formatting codes
+    assert!(output.contains("\x1b[1m"),
+            "Expected bold on code \\x1b[1m in output, got: {:?}", output);
+    assert!(output.contains("\x1b[0m"),
+            "Expected bold off code \\x1b[0m in output, got: {:?}", output);
+}
