@@ -1,0 +1,28 @@
+name: Sanitizers
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  asan-regression:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install ASAN runtime deps
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+
+      - name: Run ASAN regression suite
+        run: make asan-regression
