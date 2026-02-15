@@ -34,6 +34,59 @@ extern "C" fn handle_sigint(_signum: i32) {
     SIGINT_RECEIVED.store(true, Ordering::SeqCst);
 }
 
+struct LoadedInput {
+    markdown: String,
+    source_label: String,
+    reload_path: Option<String>,
+}
+
+enum InputLoadError {
+    Usage,
+    ReadFile(io::Error),
+    ReadStdin(io::Error),
+}
+
+fn load_input<FReadStdin, FReadFile>(
+    file_arg: Option<&str>,
+    stdin_is_terminal: bool,
+    read_stdin: &FReadStdin,
+    read_file: &FReadFile,
+) -> Result<LoadedInput, InputLoadError>
+where
+    FReadStdin: Fn() -> Result<String, io::Error>,
+    FReadFile: Fn(&str) -> Result<String, io::Error>,
+{
+    match file_arg {
+        Some("-") => {
+            let markdown = read_stdin().map_err(InputLoadError::ReadStdin)?;
+            Ok(LoadedInput {
+                markdown,
+                source_label: source_label_for_arg(Some("-")),
+                reload_path: None,
+            })
+        }
+        Some(file_path) => {
+            let markdown = read_file(file_path).map_err(InputLoadError::ReadFile)?;
+            Ok(LoadedInput {
+                markdown,
+                source_label: source_label_for_arg(Some(file_path)),
+                reload_path: Some(file_path.to_string()),
+            })
+        }
+        None => {
+            if stdin_is_terminal {
+                return Err(InputLoadError::Usage);
+            }
+            let markdown = read_stdin().map_err(InputLoadError::ReadStdin)?;
+            Ok(LoadedInput {
+                markdown,
+                source_label: source_label_for_arg(None),
+                reload_path: None,
+            })
+        }
+    }
+}
+
 fn main() {
     process::exit(run());
 }
@@ -87,39 +140,31 @@ fn run() -> i32 {
         .get_one::<usize>("bench-iters")
         .expect("bench-iters has a default value");
 
-    let (markdown, source_label, reload_path) = match matches.get_one::<String>("file") {
-        Some(file_path) if file_path == "-" => match read_stdin() {
-            Ok(contents) => (contents, source_label_for_arg(Some("-")), None),
-            Err(e) => {
-                eprintln!("Error reading stdin: {e}");
-                return 2;
-            }
-        },
-        Some(file_path) => match read_file(file_path) {
-            Ok(contents) => (
-                contents,
-                source_label_for_arg(Some(file_path)),
-                Some(file_path.to_string()),
-            ),
-            Err(e) => {
-                eprintln!("Error reading file: {e}");
-                return 1;
-            }
-        },
-        None => {
-            if io::stdin().is_terminal() {
-                println!("Usage: mdp <file>");
-                return 0;
-            }
-            match read_stdin() {
-                Ok(contents) => (contents, source_label_for_arg(None), None),
-                Err(e) => {
-                    eprintln!("Error reading stdin: {e}");
-                    return 2;
-                }
-            }
+    let loaded = match load_input(
+        matches.get_one::<String>("file").map(String::as_str),
+        io::stdin().is_terminal(),
+        &read_stdin,
+        &read_file,
+    ) {
+        Ok(loaded) => loaded,
+        Err(InputLoadError::Usage) => {
+            println!("Usage: mdp <file>");
+            return 0;
+        }
+        Err(InputLoadError::ReadFile(e)) => {
+            eprintln!("Error reading file: {e}");
+            return 1;
+        }
+        Err(InputLoadError::ReadStdin(e)) => {
+            eprintln!("Error reading stdin: {e}");
+            return 2;
         }
     };
+    let LoadedInput {
+        markdown,
+        source_label,
+        reload_path,
+    } = loaded;
 
     if benchmark_mode {
         let width = width_override.unwrap_or_else(detect_default_width);
@@ -238,6 +283,94 @@ struct FrameCache {
     footer: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PagerKeyAction {
+    Quit,
+    ScrollDown,
+    ScrollUp,
+    PageDown,
+    PageUp,
+    GoToBeginning,
+    GoToEnd,
+    SearchPrompt,
+    SearchNext,
+    SearchPrevious,
+    ShowHelp,
+    Reload,
+    Noop,
+}
+
+trait PagerNavigation {
+    fn scroll_down(&mut self);
+    fn scroll_up(&mut self);
+    fn page_down(&mut self);
+    fn page_up(&mut self);
+    fn go_to_beginning(&mut self);
+    fn go_to_end(&mut self);
+    fn search_next(&mut self);
+    fn search_previous(&mut self);
+}
+
+impl PagerNavigation for Pager {
+    fn scroll_down(&mut self) {
+        Pager::scroll_down(self);
+    }
+    fn scroll_up(&mut self) {
+        Pager::scroll_up(self);
+    }
+    fn page_down(&mut self) {
+        Pager::page_down(self);
+    }
+    fn page_up(&mut self) {
+        Pager::page_up(self);
+    }
+    fn go_to_beginning(&mut self) {
+        Pager::go_to_beginning(self);
+    }
+    fn go_to_end(&mut self) {
+        Pager::go_to_end(self);
+    }
+    fn search_next(&mut self) {
+        Pager::search_next(self);
+    }
+    fn search_previous(&mut self) {
+        Pager::search_previous(self);
+    }
+}
+
+fn key_event_to_action(code: KeyCode) -> PagerKeyAction {
+    match code {
+        KeyCode::Char('q') | KeyCode::Char('Q') => PagerKeyAction::Quit,
+        KeyCode::Char('j') | KeyCode::Down | KeyCode::Enter => PagerKeyAction::ScrollDown,
+        KeyCode::Char('k') | KeyCode::Up => PagerKeyAction::ScrollUp,
+        KeyCode::Char(' ') | KeyCode::Char('f') | KeyCode::PageDown => PagerKeyAction::PageDown,
+        KeyCode::Char('b') | KeyCode::PageUp => PagerKeyAction::PageUp,
+        KeyCode::Char('g') | KeyCode::Home => PagerKeyAction::GoToBeginning,
+        KeyCode::Char('G') | KeyCode::End => PagerKeyAction::GoToEnd,
+        KeyCode::Char('/') => PagerKeyAction::SearchPrompt,
+        KeyCode::Char('n') => PagerKeyAction::SearchNext,
+        KeyCode::Char('N') => PagerKeyAction::SearchPrevious,
+        KeyCode::Char('h') | KeyCode::Char('?') => PagerKeyAction::ShowHelp,
+        KeyCode::Char('r') | KeyCode::Char('R') => PagerKeyAction::Reload,
+        _ => PagerKeyAction::Noop,
+    }
+}
+
+fn apply_navigation_action(pager: &mut impl PagerNavigation, action: PagerKeyAction) -> bool {
+    match action {
+        PagerKeyAction::ScrollDown => pager.scroll_down(),
+        PagerKeyAction::ScrollUp => pager.scroll_up(),
+        PagerKeyAction::PageDown => pager.page_down(),
+        PagerKeyAction::PageUp => pager.page_up(),
+        PagerKeyAction::GoToBeginning => pager.go_to_beginning(),
+        PagerKeyAction::GoToEnd => pager.go_to_end(),
+        PagerKeyAction::SearchNext => pager.search_next(),
+        PagerKeyAction::SearchPrevious => pager.search_previous(),
+        _ => return false,
+    }
+    true
+}
+
 fn run_interactive_pager(
     mut markdown: String,
     width_override: Option<usize>,
@@ -309,15 +442,10 @@ fn run_interactive_pager(
         }
 
         status_message = None;
-        match key_event.code {
-            KeyCode::Char('q') | KeyCode::Char('Q') => break,
-            KeyCode::Char('j') | KeyCode::Down | KeyCode::Enter => pager.scroll_down(),
-            KeyCode::Char('k') | KeyCode::Up => pager.scroll_up(),
-            KeyCode::Char(' ') | KeyCode::Char('f') | KeyCode::PageDown => pager.page_down(),
-            KeyCode::Char('b') | KeyCode::PageUp => pager.page_up(),
-            KeyCode::Char('g') | KeyCode::Home => pager.go_to_beginning(),
-            KeyCode::Char('G') | KeyCode::End => pager.go_to_end(),
-            KeyCode::Char('/') => match prompt_search(&pager, source_label)? {
+        let action = key_event_to_action(key_event.code);
+        match action {
+            PagerKeyAction::Quit => break,
+            PagerKeyAction::SearchPrompt => match prompt_search(&pager, source_label)? {
                 Some(pattern) if pattern.is_empty() => {
                     pager.clear_search();
                     status_message = Some("Search cleared".to_string());
@@ -329,10 +457,8 @@ fn run_interactive_pager(
                     status_message = Some("Search canceled".to_string());
                 }
             },
-            KeyCode::Char('n') => pager.search_next(),
-            KeyCode::Char('N') => pager.search_previous(),
-            KeyCode::Char('h') | KeyCode::Char('?') => draw_help(&pager.help_text())?,
-            KeyCode::Char('r') | KeyCode::Char('R') => match reload_markdown(reload_path) {
+            PagerKeyAction::ShowHelp => draw_help(&pager.help_text())?,
+            PagerKeyAction::Reload => match reload_markdown(reload_path) {
                 Ok(Some(reloaded)) => {
                     markdown = reloaded;
                     let old_scroll = pager.scroll_position();
@@ -354,7 +480,9 @@ fn run_interactive_pager(
                     status_message = Some(format!("Reload failed: {e}"));
                 }
             },
-            _ => {}
+            _ => {
+                let _ = apply_navigation_action(&mut pager, action);
+            }
         }
         draw_page(
             &pager,
@@ -431,10 +559,12 @@ fn source_label_for_arg(file_arg: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_footer_line, default_width_for_cols, interrupted_exit_code, looks_binary,
-        reload_markdown, source_label_for_arg, SIGINT_RECEIVED,
+        apply_navigation_action, build_footer_line, default_width_for_cols, interrupted_exit_code,
+        key_event_to_action, load_input, looks_binary, reload_markdown, run_benchmark,
+        source_label_for_arg, InputLoadError, PagerKeyAction, PagerNavigation, SIGINT_RECEIVED,
     };
     use mdp::pager::{Pager, PagerConfig};
+    use std::io;
     use std::fs;
     use std::sync::atomic::Ordering;
 
@@ -534,6 +664,117 @@ mod tests {
         SIGINT_RECEIVED.store(false, Ordering::SeqCst);
         super::handle_sigint(super::SIGINT);
         assert!(SIGINT_RECEIVED.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_load_input_returns_usage_when_no_file_and_tty() {
+        let result = load_input(None, true, &|| Ok("stdin".to_string()), &|_| Ok("".to_string()));
+        assert!(matches!(result, Err(InputLoadError::Usage)));
+    }
+
+    #[test]
+    fn test_load_input_propagates_file_read_error() {
+        let result = load_input(
+            Some("missing.md"),
+            true,
+            &|| Ok(String::new()),
+            &|_| Err(io::Error::new(io::ErrorKind::NotFound, "missing")),
+        );
+        assert!(matches!(result, Err(InputLoadError::ReadFile(_))));
+    }
+
+    #[test]
+    fn test_load_input_propagates_stdin_read_error_for_dash() {
+        let result = load_input(
+            Some("-"),
+            false,
+            &|| Err(io::Error::other("stdin fail")),
+            &|_| Ok(String::new()),
+        );
+        assert!(matches!(result, Err(InputLoadError::ReadStdin(_))));
+    }
+
+    #[test]
+    fn test_benchmark_report_has_expected_fields_and_clamps_iterations() {
+        let report = run_benchmark("# heading\n\n- one\n- two\n", 80, true, 0);
+        assert!(
+            report.contains("Benchmark (mdp)")
+                && report.contains("Iterations: 1")
+                && report.contains("Input bytes:")
+                && report.contains("Parse+Render avg:")
+                && report.contains("Search hits:"),
+            "Unexpected benchmark report format: {report}"
+        );
+    }
+
+    #[test]
+    fn test_key_mapping_for_navigation_actions() {
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Down),
+            PagerKeyAction::ScrollDown
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::PageUp),
+            PagerKeyAction::PageUp
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('/')),
+            PagerKeyAction::SearchPrompt
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('r')),
+            PagerKeyAction::Reload
+        );
+    }
+
+    struct MockPagerNav {
+        calls: Vec<&'static str>,
+    }
+
+    impl MockPagerNav {
+        fn new() -> Self {
+            Self { calls: Vec::new() }
+        }
+    }
+
+    impl PagerNavigation for MockPagerNav {
+        fn scroll_down(&mut self) {
+            self.calls.push("scroll_down");
+        }
+        fn scroll_up(&mut self) {
+            self.calls.push("scroll_up");
+        }
+        fn page_down(&mut self) {
+            self.calls.push("page_down");
+        }
+        fn page_up(&mut self) {
+            self.calls.push("page_up");
+        }
+        fn go_to_beginning(&mut self) {
+            self.calls.push("go_to_beginning");
+        }
+        fn go_to_end(&mut self) {
+            self.calls.push("go_to_end");
+        }
+        fn search_next(&mut self) {
+            self.calls.push("search_next");
+        }
+        fn search_previous(&mut self) {
+            self.calls.push("search_previous");
+        }
+    }
+
+    #[test]
+    fn test_apply_navigation_action_dispatches_to_target() {
+        let mut nav = MockPagerNav::new();
+        assert!(apply_navigation_action(&mut nav, PagerKeyAction::ScrollDown));
+        assert!(apply_navigation_action(&mut nav, PagerKeyAction::GoToEnd));
+        assert!(apply_navigation_action(&mut nav, PagerKeyAction::SearchPrevious));
+        assert!(!apply_navigation_action(&mut nav, PagerKeyAction::ShowHelp));
+        assert_eq!(
+            nav.calls,
+            vec!["scroll_down", "go_to_end", "search_previous"]
+        );
     }
 }
 

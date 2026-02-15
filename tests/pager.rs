@@ -542,3 +542,106 @@ fn test_help_keybindings() {
         help_string
     );
 }
+
+#[test]
+fn test_clear_search_resets_search_state() {
+    let mut pager = Pager::new(
+        PagerConfig {
+            page_size: 5,
+            cols: 80,
+        },
+        vec!["alpha beta".to_string(), "beta gamma".to_string()],
+    );
+    assert!(pager.search("beta").is_some(), "expected initial match");
+    assert!(
+        pager.search_status_message().contains("Search:"),
+        "expected active search state"
+    );
+
+    pager.clear_search();
+    assert_eq!(
+        pager.search_status_message(),
+        "",
+        "search status should be empty after clear_search"
+    );
+    let rendered = pager.visible_lines_with_highlight();
+    assert!(
+        rendered.iter().all(|line| !line.contains("\x1b[1m")),
+        "expected no highlighted matches after clear_search: {:?}",
+        rendered
+    );
+}
+
+#[test]
+fn test_empty_pattern_search_clears_previous_search_state() {
+    let mut pager = Pager::new(
+        PagerConfig {
+            page_size: 5,
+            cols: 80,
+        },
+        vec!["alpha beta".to_string(), "beta gamma".to_string()],
+    );
+    let _ = pager.search("beta");
+    assert!(
+        pager.search_status_message().contains("Search:"),
+        "expected active search status before clearing"
+    );
+
+    let result = pager.search("");
+    assert!(result.is_none(), "empty search should return None");
+    assert_eq!(
+        pager.search_status_message(),
+        "",
+        "empty pattern should clear status"
+    );
+}
+
+#[test]
+fn test_go_to_line_clamps_and_go_to_end_respects_short_documents() {
+    let lines: Vec<String> = (1..=9).map(|i| format!("Line {}", i)).collect();
+    let mut pager = Pager::new(
+        PagerConfig {
+            page_size: 5,
+            cols: 80,
+        },
+        lines,
+    );
+
+    pager.go_to_line(999);
+    assert_eq!(pager.scroll_position(), 4, "go_to_line should clamp to max");
+
+    pager.go_to_end();
+    assert_eq!(
+        pager.scroll_position(),
+        4,
+        "go_to_end should match clamped max scroll position"
+    );
+}
+
+#[test]
+fn test_search_highlights_multiple_matches_on_same_line() {
+    let mut pager = Pager::new(
+        PagerConfig {
+            page_size: 5,
+            cols: 80,
+        },
+        vec!["foo foo foo".to_string()],
+    );
+    let found = pager.search("foo");
+    assert!(found.is_some(), "expected at least one search match");
+
+    let rendered = pager.visible_lines_with_highlight();
+    let line = rendered.first().expect("line should exist");
+    assert_eq!(
+        line.matches("\x1b[1m").count(),
+        3,
+        "expected all matches to be highlighted on one line: {:?}",
+        line
+    );
+    assert_eq!(
+        line.matches("\x1b[7m").count(),
+        1,
+        "expected exactly one current-match highlight: {:?}",
+        line
+    );
+}

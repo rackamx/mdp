@@ -608,14 +608,14 @@ After implementing tasks:
 
 ## TODO
 
-- [ ] Add CLI-level tests for `run()` error paths (missing/unreadable files, stdin read failures, and non-zero exit codes).
-- [ ] Add a benchmark-mode test that validates output fields and iteration clamping.
-- [ ] Extract the interactive event loop behind a small trait to unit-test key handling.
-- [ ] Inject terminal operations so tests can deterministically cover `enable_raw_mode`/`disable_raw_mode` failure paths.
-- [ ] Add tests for panic-hook cleanup and `Drop` flush behavior without requiring a TTY.
-- [ ] Add focused tests for `clear_search`, empty-pattern search resets, and boundary behavior of `go_to_line`/`go_to_end`.
-- [ ] Add tests that assert highlighting on lines with multiple overlapping matches.
-- [ ] Add parser tests for setext headings, reference-definition gap emission, and list marker extraction (`-`, `*`, `+`, ordered starts).
-- [ ] Add regression tests for escaped image-like links and source-range extraction.
-- [ ] Add rendering tests for HTML block boundaries, definition lists, and table alignment output.
-- [ ] Add tests for nested emphasis/strong/strikethrough interactions and wrapping around ANSI-decorated text.
+- [x] Add CLI-level tests for `run()` error paths (missing/unreadable files, stdin read failures, and non-zero exit codes).
+- [x] Add a benchmark-mode test that validates output fields and iteration clamping.
+- [x] Extract the interactive event loop behind a small trait to unit-test key handling.
+- [x] Inject terminal operations so tests can deterministically cover `enable_raw_mode`/`disable_raw_mode` failure paths.
+- [x] Add tests for panic-hook cleanup and `Drop` flush behavior without requiring a TTY.
+- [x] Add focused tests for `clear_search`, empty-pattern search resets, and boundary behavior of `go_to_line`/`go_to_end`.
+- [x] Add tests that assert highlighting on lines with multiple overlapping matches.
+- [x] Add parser tests for setext headings, reference-definition gap emission, and list marker extraction (`-`, `*`, `+`, ordered starts).
+- [x] Add regression tests for escaped image-like links and source-range extraction.
+- [x] Add rendering tests for HTML block boundaries, definition lists, and table alignment output.
+- [x] Add tests for nested emphasis/strong/strikethrough interactions and wrapping around ANSI-decorated text.

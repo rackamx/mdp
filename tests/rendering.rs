@@ -754,6 +754,26 @@ fn test_render_html_comment_block_has_no_extra_empty_comment_line() {
     );
 }
 
+#[test]
+fn test_render_html_block_boundaries_preserve_neighboring_text() {
+    let markdown = "before\n\n<div>block</div>\n\nafter";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("before") && plain.contains("<div>block</div>") && plain.contains("after"),
+        "Expected html block to preserve surrounding text boundaries, got: {:?}",
+        plain
+    );
+    assert!(
+        !plain.contains("before<div>") && !plain.contains("</div>after"),
+        "Expected html block to stay separated from neighboring text, got: {:?}",
+        plain
+    );
+}
+
 /// Test block quote rendering with > prefix
 #[test]
 fn test_render_block_quote() {
@@ -1670,6 +1690,31 @@ fn test_render_strikethrough_fallback_crosses_spaces() {
         plain.contains(" \u{0336}"),
         "Expected combining strikethrough on spaces too, got: {:?}",
         plain
+    );
+}
+
+#[test]
+fn test_render_nested_emphasis_strong_strikethrough_wraps_with_ansi() {
+    let markdown = "*prefix **nested ~~verylongtokenverylongtokenverylongtoken~~ suffix** trailer*";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(32);
+    renderer.set_strikethrough_fallback(false);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let normalized = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(
+        normalized.contains("prefix nested verylongtokenverylongtokenverylongtoken suffix trailer"),
+        "Expected nested formatted text to be preserved across wrapping, got: {:?}",
+        plain
+    );
+    assert!(
+        output.contains("\x1b[3m")
+            && output.contains("\x1b[1m")
+            && output.contains("\x1b[9m")
+            && output.lines().count() > 1,
+        "Expected italics, bold, strikethrough ANSI codes with wrapped output, got: {:?}",
+        output
     );
 }
 

@@ -187,6 +187,56 @@ fn test_exit_code_file_error() {
 }
 
 #[test]
+fn test_directory_path_is_reported_as_file_read_error() {
+    let temp_dir = std::env::temp_dir();
+    let output = Command::new(env!("CARGO_BIN_EXE_mdp"))
+        .arg(&temp_dir)
+        .output()
+        .expect("run mdp");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "Expected file read error exit code for directory path"
+    );
+}
+
+#[test]
+fn test_benchmark_mode_reports_expected_fields_and_clamps_zero_iters() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mdp"))
+        .arg("--benchmark")
+        .arg("--bench-iters")
+        .arg("0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute mdp benchmark");
+
+    let input = "# Bench\n\n- one\n- two\n";
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be piped")
+        .write_all(input.as_bytes())
+        .expect("Failed writing benchmark stdin");
+
+    let output = child.wait_with_output().expect("Failed waiting on mdp");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "Benchmark mode should exit successfully"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Benchmark (mdp)")
+            && stdout.contains("Iterations: 1")
+            && stdout.contains("Input bytes:")
+            && stdout.contains("Parse+Render avg:")
+            && stdout.contains("Search hits:"),
+        "Unexpected benchmark output: {stdout}"
+    );
+}
+
+#[test]
 fn test_binary_file_rejected() {
     let temp_dir = std::env::temp_dir();
     let test_file = temp_dir.join("mdp_binary.bin");

@@ -250,3 +250,35 @@ fn test_parse_inline_code_with_inner_backticks_and_spaces() {
         events
     );
 }
+
+#[test]
+fn test_parse_link_source_range_is_preserved() {
+    let markdown = "see [docs](https://example.com/docs) now";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let link = events.iter().find_map(|e| match e {
+        Event::Link { source, .. } => Some(source.as_str()),
+        _ => None,
+    });
+    assert_eq!(
+        link,
+        Some("[docs](https://example.com/docs)"),
+        "Expected link source range to be preserved, got: {:?}",
+        events
+    );
+}
+
+#[test]
+fn test_parse_escaped_image_like_link_preserves_literal_source() {
+    let markdown = "\\![not image](x)";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let source = events.iter().find_map(|e| match e {
+        Event::Link { source, .. } => Some(source.as_str()),
+        _ => None,
+    });
+    assert_eq!(
+        source,
+        Some("![not image](x)"),
+        "Expected escaped image-like link source to remain literal markdown form, got: {:?}",
+        events
+    );
+}
