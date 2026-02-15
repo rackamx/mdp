@@ -87,6 +87,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_text_with_wrapping()` - render long line, verify wrapped at 80 chars
   - `test_render_multiple_lines()` - render 3 paragraphs, verify line breaks
 
+**Status**: DONE
+
 ---
 
 ### T06 - Bold Text Rendering
