@@ -284,4 +284,18 @@ mod tests {
         assert_eq!(size.cols, 120);
         assert_eq!(size.rows, 40);
     }
+
+    #[test]
+    fn test_system_terminal_ops_methods_are_invocable_best_effort() {
+        let ops = SystemTerminalOps;
+
+        let _ = ops.enable_raw_mode();
+        let _ = ops.disable_raw_mode();
+        let _ = ops.size();
+        let _ = ops.flush_stdout();
+
+        let previous_hook = panic::take_hook();
+        ops.install_panic_hook(Box::new(|| {}));
+        panic::set_hook(previous_hook);
+    }
 }

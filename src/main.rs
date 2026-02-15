@@ -560,9 +560,10 @@ fn source_label_for_arg(file_arg: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_navigation_action, build_footer_line, default_width_for_cols, interrupted_exit_code,
-        key_event_to_action, load_input, looks_binary, reload_markdown, run_benchmark,
-        source_label_for_arg, InputLoadError, PagerKeyAction, PagerNavigation, SIGINT_RECEIVED,
+        apply_navigation_action, build_footer_line, build_pager, default_width_for_cols,
+        interrupted_exit_code, key_event_to_action, load_input, looks_binary, reload_markdown,
+        render_markdown_lines, run_benchmark, source_label_for_arg, InputLoadError,
+        PagerKeyAction, PagerNavigation, SIGINT_RECEIVED,
     };
     use mdp::pager::{Pager, PagerConfig};
     use std::io;
@@ -696,6 +697,17 @@ mod tests {
     }
 
     #[test]
+    fn test_load_input_propagates_stdin_read_error_without_file_arg() {
+        let result = load_input(
+            None,
+            false,
+            &|| Err(io::Error::other("stdin fail")),
+            &|_| Ok(String::new()),
+        );
+        assert!(matches!(result, Err(InputLoadError::ReadStdin(_))));
+    }
+
+    #[test]
     fn test_benchmark_report_has_expected_fields_and_clamps_iterations() {
         let report = run_benchmark("# heading\n\n- one\n- two\n", 80, true, 0);
         assert!(
@@ -705,6 +717,15 @@ mod tests {
                 && report.contains("Parse+Render avg:")
                 && report.contains("Search hits:"),
             "Unexpected benchmark report format: {report}"
+        );
+    }
+
+    #[test]
+    fn test_benchmark_handles_empty_rendered_output_path() {
+        let report = run_benchmark("", 80, true, 1);
+        assert!(
+            report.contains("Rendered lines: 0"),
+            "Expected empty markdown benchmark to report 0 rendered lines: {report}"
         );
     }
 
@@ -895,6 +916,19 @@ mod tests {
 
         fs::remove_file(text_path).ok();
         fs::remove_file(bin_path).ok();
+    }
+
+    #[test]
+    fn test_render_markdown_lines_returns_empty_for_empty_input() {
+        let lines = render_markdown_lines("", 80, true);
+        assert!(lines.is_empty(), "Expected no lines for empty markdown");
+    }
+
+    #[test]
+    fn test_build_pager_ensures_at_least_one_line_for_empty_input() {
+        let pager = build_pager("", 10, 80, 0, None, true);
+        assert_eq!(pager.total_lines(), 1, "pager should contain one empty line");
+        assert_eq!(pager.visible_lines(), vec![String::new()]);
     }
 }
 
