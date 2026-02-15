@@ -40,6 +40,7 @@ struct LoadedInput {
     reload_path: Option<String>,
 }
 
+#[derive(Debug)]
 enum InputLoadError {
     Usage,
     ReadFile(io::Error),
@@ -775,6 +776,125 @@ mod tests {
             nav.calls,
             vec!["scroll_down", "go_to_end", "search_previous"]
         );
+    }
+
+    #[test]
+    fn test_load_input_file_success_sets_reload_path_and_label() {
+        let result = load_input(
+            Some("/tmp/path/example.md"),
+            true,
+            &|| Ok(String::new()),
+            &|_| Ok("# doc\n".to_string()),
+        )
+        .expect("file load should succeed");
+        assert_eq!(result.markdown, "# doc\n");
+        assert_eq!(result.source_label, "example.md");
+        assert_eq!(result.reload_path.as_deref(), Some("/tmp/path/example.md"));
+    }
+
+    #[test]
+    fn test_load_input_stdin_success_without_file_arg() {
+        let result = load_input(None, false, &|| Ok("from-stdin".to_string()), &|_| {
+            Ok(String::new())
+        })
+        .expect("stdin load should succeed");
+        assert_eq!(result.markdown, "from-stdin");
+        assert_eq!(result.source_label, "(stdin)");
+        assert!(result.reload_path.is_none());
+    }
+
+    #[test]
+    fn test_key_mapping_for_non_navigation_keys() {
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('x')),
+            PagerKeyAction::Noop
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('Q')),
+            PagerKeyAction::Quit
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('h')),
+            PagerKeyAction::ShowHelp
+        );
+    }
+
+    #[test]
+    fn test_apply_navigation_action_covers_all_navigation_calls() {
+        let mut nav = MockPagerNav::new();
+        let actions = [
+            PagerKeyAction::ScrollDown,
+            PagerKeyAction::ScrollUp,
+            PagerKeyAction::PageDown,
+            PagerKeyAction::PageUp,
+            PagerKeyAction::GoToBeginning,
+            PagerKeyAction::GoToEnd,
+            PagerKeyAction::SearchNext,
+            PagerKeyAction::SearchPrevious,
+        ];
+        for action in actions {
+            assert!(apply_navigation_action(&mut nav, action));
+        }
+        assert_eq!(
+            nav.calls,
+            vec![
+                "scroll_down",
+                "scroll_up",
+                "page_down",
+                "page_up",
+                "go_to_beginning",
+                "go_to_end",
+                "search_next",
+                "search_previous"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_reload_markdown_missing_file_propagates_error() {
+        let err = reload_markdown(Some("/definitely/missing/file.md"))
+            .expect_err("missing file should produce error");
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn test_looks_binary_threshold_and_edge_cases() {
+        assert!(!looks_binary(&[]), "empty content should not be binary");
+        assert!(
+            !looks_binary(&[0x09, 0x0A, 0x0D, b'a', b'b']),
+            "whitespace controls should be treated as text"
+        );
+        let exactly_ten_percent = [b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', 0x01];
+        assert!(
+            !looks_binary(&exactly_ten_percent),
+            "10% suspicious bytes should not cross the binary threshold"
+        );
+        let above_ten_percent = [b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', 0x01, 0x02];
+        assert!(
+            looks_binary(&above_ten_percent),
+            ">10% suspicious bytes should be binary"
+        );
+    }
+
+    #[test]
+    fn test_read_file_accepts_non_utf8_text_and_rejects_binary() {
+        let temp_dir = std::env::temp_dir();
+        let text_path = temp_dir.join("mdp_main_read_file_text.bin");
+        fs::write(&text_path, b"hello \xFF world\n").expect("write text-like bytes");
+        let text = super::read_file(&text_path.to_string_lossy()).expect("text-like bytes valid");
+        assert!(
+            text.contains("hello"),
+            "expected lossy text conversion for non-utf8"
+        );
+
+        let bin_path = temp_dir.join("mdp_main_read_file_binary.bin");
+        fs::write(&bin_path, [0_u8, 1, 2, 3]).expect("write binary bytes");
+        let err = super::read_file(&bin_path.to_string_lossy())
+            .expect_err("binary bytes should be rejected");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+
+        fs::remove_file(text_path).ok();
+        fs::remove_file(bin_path).ok();
     }
 }
 

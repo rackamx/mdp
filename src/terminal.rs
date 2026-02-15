@@ -268,4 +268,20 @@ mod tests {
 
         drop(terminal);
     }
+
+    #[test]
+    fn test_is_raw_mode_true_after_successful_creation() {
+        let ops = MockTerminalOps::new();
+        let terminal = Terminal::new_with_ops(ops).expect("terminal should be created");
+        assert!(terminal.is_raw_mode(), "expected raw mode flag after creation");
+    }
+
+    #[test]
+    fn test_size_reads_values_from_ops() {
+        let ops = MockTerminalOps::new();
+        let terminal = Terminal::new_with_ops(ops).expect("terminal should be created");
+        let size = terminal.size().expect("size should succeed");
+        assert_eq!(size.cols, 120);
+        assert_eq!(size.rows, 40);
+    }
 }
