@@ -363,3 +363,136 @@ fn test_render_block_quote_multiline() {
     assert!(pipe_count >= 3,
             "Expected at least 3 '|' prefixes in output, got: {}", pipe_count);
 }
+
+/// Test bullet list rendering with - prefix
+#[test]
+fn test_render_bullet_list() {
+    let markdown = "- item";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the item text
+    assert!(output.contains("item"),
+            "Expected 'item' in output, got: {:?}", output);
+    // Should have * prefix for bullet list
+    assert!(output.contains("* "),
+            "Expected '* ' prefix for bullet list in output, got: {:?}", output);
+}
+
+/// Test bullet list with * prefix
+#[test]
+fn test_render_bullet_list_asterisk() {
+    let markdown = "* item";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the item text
+    assert!(output.contains("item"),
+            "Expected 'item' in output, got: {:?}", output);
+    // Should have * prefix for bullet list
+    assert!(output.contains("* "),
+            "Expected '* ' prefix for bullet list in output, got: {:?}", output);
+}
+
+/// Test bullet list with + prefix (should normalize to *)
+#[test]
+fn test_render_bullet_list_plus() {
+    let markdown = "+ item";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the item text
+    assert!(output.contains("item"),
+            "Expected 'item' in output, got: {:?}", output);
+    // Should have * prefix for bullet list (normalized from +)
+    assert!(output.contains("* "),
+            "Expected '* ' prefix for bullet list in output, got: {:?}", output);
+}
+
+/// Test ordered list rendering with 1. prefix
+#[test]
+fn test_render_ordered_list() {
+    let markdown = "1. item";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the item text
+    assert!(output.contains("item"),
+            "Expected 'item' in output, got: {:?}", output);
+    // Should have 1. prefix for ordered list
+    assert!(output.contains("1. "),
+            "Expected '1. ' prefix for ordered list in output, got: {:?}", output);
+}
+
+/// Test ordered list with multiple items
+#[test]
+fn test_render_ordered_list_multiple_items() {
+    let markdown = "1. first\n2. second\n3. third";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain all items
+    assert!(output.contains("first"),
+            "Expected 'first' in output, got: {:?}", output);
+    assert!(output.contains("second"),
+            "Expected 'second' in output, got: {:?}", output);
+    assert!(output.contains("third"),
+            "Expected 'third' in output, got: {:?}", output);
+    // Should have numbered prefixes
+    assert!(output.contains("1. "),
+            "Expected '1. ' prefix in output, got: {:?}", output);
+    assert!(output.contains("2. "),
+            "Expected '2. ' prefix in output, got: {:?}", output);
+    assert!(output.contains("3. "),
+            "Expected '3. ' prefix in output, got: {:?}", output);
+}
+
+/// Test nested list rendering with indentation
+#[test]
+fn test_render_nested_list() {
+    let markdown = "- outer\n  - inner";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain both items
+    assert!(output.contains("outer"),
+            "Expected 'outer' in output, got: {:?}", output);
+    assert!(output.contains("inner"),
+            "Expected 'inner' in output, got: {:?}", output);
+    // Should have indentation for nested list (check for leading spaces)
+    let lines: Vec<&str> = output.lines().collect();
+    // At least one line should have leading spaces (indentation)
+    let has_indentation = lines.iter().any(|l| l.starts_with(' '));
+    assert!(has_indentation,
+            "Expected indentation for nested list, got lines: {:?}", lines);
+}
+
+/// Test deeply nested list
+#[test]
+fn test_render_deeply_nested_list() {
+    let markdown = "- level 1\n  - level 2\n    - level 3";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain all items
+    assert!(output.contains("level 1"),
+            "Expected 'level 1' in output, got: {:?}", output);
+    assert!(output.contains("level 2"),
+            "Expected 'level 2' in output, got: {:?}", output);
+    assert!(output.contains("level 3"),
+            "Expected 'level 3' in output, got: {:?}", output);
+}

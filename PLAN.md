@@ -175,6 +175,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_ordered_list()` - render `1. item`, verify `1. ` prefix
   - `test_render_nested_list()` - render nested lists, verify indentation
 
+**Status**: DONE
+
 ---
 
 ### T11 - Link Rendering

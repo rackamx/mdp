@@ -22,6 +22,14 @@ pub struct Renderer {
     in_block_quote: bool,
     /// Prefix character for block quote
     block_quote_prefix: char,
+    /// Whether we're currently in a list
+    in_list: bool,
+    /// Whether the current list is ordered (numbered) vs unordered (bullet)
+    list_is_ordered: bool,
+    /// Current item number for ordered lists
+    list_item_number: u64,
+    /// Current list nesting depth
+    list_depth: usize,
 }
 
 impl Renderer {
@@ -38,6 +46,10 @@ impl Renderer {
             code_block_info: None,
             in_block_quote: false,
             block_quote_prefix: '|',
+            in_list: false,
+            list_is_ordered: false,
+            list_item_number: 0,
+            list_depth: 0,
         }
     }
 
@@ -52,6 +64,10 @@ impl Renderer {
         self.in_code_block = false;
         self.code_block_info = None;
         self.in_block_quote = false;
+        self.in_list = false;
+        self.list_is_ordered = false;
+        self.list_item_number = 0;
+        self.list_depth = 0;
 
         for event in events {
             self.process_event(event);
@@ -242,11 +258,40 @@ impl Renderer {
                 // Use faint for monospace indication
                 self.current_line.push_str("\x1b[2m");
             }
-            crate::parsing::Block::List { start: _ } => {
-                // List handling
+            crate::parsing::Block::List { start } => {
+                // Track list state
+                if self.in_list {
+                    // We're already in a list, this is a nested list
+                    self.list_depth += 1;
+                }
+                self.in_list = true;
+                self.list_is_ordered = start.is_some();
+                self.list_item_number = start.unwrap_or(1);
             }
             crate::parsing::Block::ListItem => {
-                // List item handling
+                // Add list item prefix with proper indentation
+                // Indentation is 2 spaces per depth level
+                let indentation = "  ".repeat(self.list_depth);
+                self.current_line.push_str(&indentation);
+
+                // Add the marker
+                if self.list_is_ordered {
+                    // Ordered list: "1. ", "2. ", etc.
+                    self.current_line.push_str(&format!("{}. ", self.list_item_number));
+                    self.list_item_number += 1;
+                } else {
+                    // Unordered list: use "* " for - and + markers (standard)
+                    self.current_line.push_str("* ");
+                }
+
+                // Update cursor position (accounting for indentation and marker)
+                self.cursor_col = indentation.len() + if self.list_is_ordered {
+                    // Number + ". "
+                    self.list_item_number.to_string().len() + 2
+                } else {
+                    // "* " = 2
+                    2
+                };
             }
         }
     }
@@ -306,6 +351,17 @@ impl Renderer {
                     self.lines.push(self.current_line.clone());
                     self.current_line.clear();
                     self.cursor_col = 0;
+                }
+            }
+            crate::parsing::Block::List { start: _ } => {
+                // Handle end of list - decrease depth if nested
+                if self.list_depth > 0 {
+                    self.list_depth -= 1;
+                } else {
+                    // We're exiting the top-level list
+                    self.in_list = false;
+                    self.list_is_ordered = false;
+                    self.list_item_number = 0;
                 }
             }
             _ => {
