@@ -69,19 +69,19 @@ cat README.md | mdp -
 Width override:
 
 ```bash
-mdp --width 100 PLAN.md
+mdp --width 100 SPEC.md
 ```
 
 Strikethrough mode:
 
 ```bash
-mdp --ansi-strikethrough PLAN.md
+mdp --ansi-strikethrough SPEC.md
 ```
 
 Benchmark:
 
 ```bash
-mdp --benchmark --bench-iters 100 PLAN.md
+mdp --benchmark --bench-iters 100 SPEC.md
 ```
 
 ## Testing
@@ -109,6 +109,13 @@ Run CommonMark audit tests (ignored by default):
 ```bash
 cargo test --test commonmark_spec -- --ignored --nocapture
 ```
+
+## Project Files
+
+- `SPEC.md`: Product specification and implementation plan, including task breakdown and current TODO checklist.
+- `AGENTS.md`: Repository working rules for coding workflow (for example TDD-first and commit expectations).
+- `spec.json`: CommonMark spec fixture data used by tests/audit tooling.
+- `STRESS.md`: Large/complex markdown fixture used for stress/performance and rendering behavior checks.
 
 ## Scope
 
