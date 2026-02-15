@@ -3,6 +3,8 @@ use std::fs;
 use std::io;
 use std::process;
 
+pub mod parsing;
+
 fn main() {
     let matches = Command::new("mdless")
         .arg(Arg::new("file")

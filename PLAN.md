@@ -59,6 +59,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_parse_heading()` - parse `# Heading`, verify Event::Start(Heading(...))
   - `test_parse_multiple_blocks()` - parse multi-block markdown, verify all events
 
+**Status**: DONE
+
 ---
 
 ### T04 - Terminal Setup
