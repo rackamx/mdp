@@ -1554,7 +1554,8 @@ fn test_render_horizontal_rule_dashes() {
     let output = renderer.render(&events);
 
     let first_line = output.lines().next().unwrap_or("");
-    let trimmed = first_line.trim_start();
+    let plain = strip_ansi(first_line);
+    let trimmed = plain.trim_start();
     assert_eq!(
         trimmed.chars().count(),
         40,
@@ -1562,7 +1563,7 @@ fn test_render_horizontal_rule_dashes() {
         output
     );
     assert_eq!(
-        first_line.len().saturating_sub(trimmed.len()),
+        plain.len().saturating_sub(trimmed.len()),
         20,
         "Expected centered rule with left padding, got: {:?}",
         output
@@ -1570,6 +1571,11 @@ fn test_render_horizontal_rule_dashes() {
     assert!(
         trimmed.chars().all(|c| c == '─'),
         "Expected Unicode line-only horizontal rule output, got: {:?}",
+        output
+    );
+    assert!(
+        first_line.contains("\x1b[2m") && first_line.contains("\x1b[0m"),
+        "Expected dim styling on thematic break, got: {:?}",
         output
     );
 }
@@ -1583,7 +1589,8 @@ fn test_render_horizontal_rule_asterisks() {
     let output = renderer.render(&events);
 
     let first_line = output.lines().next().unwrap_or("");
-    let trimmed = first_line.trim_start();
+    let plain = strip_ansi(first_line);
+    let trimmed = plain.trim_start();
     assert_eq!(
         trimmed.chars().count(),
         40,
@@ -1591,12 +1598,17 @@ fn test_render_horizontal_rule_asterisks() {
         output
     );
     assert_eq!(
-        first_line.len().saturating_sub(trimmed.len()),
+        plain.len().saturating_sub(trimmed.len()),
         20,
         "Expected centered rule with left padding, got: {:?}",
         output
     );
     assert!(trimmed.chars().all(|c| c == '═'));
+    assert!(
+        first_line.contains("\x1b[2m") && first_line.contains("\x1b[0m"),
+        "Expected dim styling on thematic break, got: {:?}",
+        output
+    );
 }
 
 /// Test horizontal rule rendering for '___'
@@ -1608,7 +1620,8 @@ fn test_render_horizontal_rule_underscores() {
     let output = renderer.render(&events);
 
     let first_line = output.lines().next().unwrap_or("");
-    let trimmed = first_line.trim_start();
+    let plain = strip_ansi(first_line);
+    let trimmed = plain.trim_start();
     assert_eq!(
         trimmed.chars().count(),
         40,
@@ -1616,12 +1629,17 @@ fn test_render_horizontal_rule_underscores() {
         output
     );
     assert_eq!(
-        first_line.len().saturating_sub(trimmed.len()),
+        plain.len().saturating_sub(trimmed.len()),
         20,
         "Expected centered rule with left padding, got: {:?}",
         output
     );
     assert!(trimmed.chars().all(|c| c == '┄'));
+    assert!(
+        first_line.contains("\x1b[2m") && first_line.contains("\x1b[0m"),
+        "Expected dim styling on thematic break, got: {:?}",
+        output
+    );
 }
 
 /// Test strikethrough rendering

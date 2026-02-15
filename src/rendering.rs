@@ -925,7 +925,9 @@ impl Renderer {
         let left_pad = self.width.saturating_sub(rule_width) / 2;
         let mut line = String::new();
         line.push_str(&" ".repeat(left_pad));
+        line.push_str("\x1b[2m");
         line.push_str(&ch.to_string().repeat(rule_width));
+        line.push_str("\x1b[0m");
         self.lines.push(line);
         self.lines.push(String::new());
     }
