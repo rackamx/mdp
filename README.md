@@ -104,6 +104,18 @@ Open HTML coverage report:
 make coverage-open
 ```
 
+Enforce coverage gate (regions/functions/lines >= 90%):
+
+```bash
+make coverage-gate
+```
+
+Run regression tests under AddressSanitizer (nightly toolchain required):
+
+```bash
+make asan-regression
+```
+
 Run CommonMark audit tests (ignored by default):
 
 ```bash
