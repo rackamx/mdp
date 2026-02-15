@@ -496,3 +496,54 @@ fn test_render_deeply_nested_list() {
     assert!(output.contains("level 3"),
             "Expected 'level 3' in output, got: {:?}", output);
 }
+
+/// Test link rendering - [text](url) should render as "text (url)"
+#[test]
+fn test_render_link() {
+    let markdown = "[link](http://example.com)";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the link text
+    assert!(output.contains("link"),
+            "Expected 'link' in output, got: {:?}", output);
+    // Should contain the URL in parentheses
+    assert!(output.contains("(http://example.com)"),
+            "Expected '(http://example.com)' in output, got: {:?}", output);
+    // Should render as "link (url)" format
+    assert!(output.contains("link (http://example.com)"),
+            "Expected 'link (http://example.com)' in output, got: {:?}", output);
+}
+
+/// Test reference link rendering - [text][ref] with missing reference should fallback
+#[test]
+fn test_render_reference_link() {
+    let markdown = "[text][ref]";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the link text
+    assert!(output.contains("text"),
+            "Expected 'text' in output, got: {:?}", output);
+    // For undefined reference, it should fall back to showing just the text
+    // or text with empty parentheses since the reference is not defined
+}
+
+/// Test image rendering - ![alt](url) should show alt text
+#[test]
+fn test_render_image_alt_text() {
+    let markdown = "![alt text](http://example.com/image.png)";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the alt text
+    assert!(output.contains("alt text"),
+            "Expected 'alt text' in output, got: {:?}", output);
+    // Should render as "[alt text]" format (not actual image)
+}

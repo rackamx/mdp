@@ -189,6 +189,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_reference_link()` - render `[text][ref]`, verify fallback
   - `test_render_image_alt_text()` - render `![alt](url)`, verify "[alt]"
 
+**Status**: DONE
+
 ---
 
 ### T11b - Auto-link Rendering

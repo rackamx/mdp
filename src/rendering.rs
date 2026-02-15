@@ -95,6 +95,8 @@ impl Renderer {
             Event::EmphasisStart => self.render_italics_start(),
             Event::EmphasisEnd => self.render_italics_end(),
             Event::InlineCode(code) => self.render_inline_code(code),
+            Event::Link { text, url } => self.render_link(text, url),
+            Event::Image { alt, url: _ } => self.render_image(alt),
         }
     }
 
@@ -173,6 +175,28 @@ impl Renderer {
         self.current_line.push_str("\x1b[0m");  // Reset
         self.current_line.push('`');
         self.cursor_col += 2 + code.len() + 2 + 1;  // ` + ANSI + code + ANSI + `
+    }
+
+    /// Render a link as "text (url)"
+    fn render_link(&mut self, text: &str, url: &str) {
+        // Add the link text
+        self.render_text(text);
+        // Add space and URL in parentheses
+        if !url.is_empty() {
+            self.current_line.push_str(" (");
+            self.current_line.push_str(url);
+            self.current_line.push(')');
+            self.cursor_col += 3 + url.len();  // " (" + url + ")"
+        }
+    }
+
+    /// Render an image by showing just the alt text in brackets
+    fn render_image(&mut self, alt: &str) {
+        // Show alt text in brackets to indicate it's an image, not actual image rendering
+        self.current_line.push('[');
+        self.current_line.push_str(alt);
+        self.current_line.push(']');
+        self.cursor_col += 2 + alt.len();  // "[" + alt + "]"
     }
 
     /// Render a hard line break

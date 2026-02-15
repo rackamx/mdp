@@ -25,6 +25,10 @@ pub enum Event {
     EmphasisEnd,
     /// Inline code (backtick-enclosed)
     InlineCode(String),
+    /// Link with text and URL
+    Link { text: String, url: String },
+    /// Image with alt text and URL (skip rendering, just show alt text)
+    Image { alt: String, url: String },
 }
 
 /// Block elements in markdown
@@ -46,37 +50,104 @@ pub enum Block {
 
 /// Parse markdown text and return an iterator of events
 pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
-    Parser::new(markdown).map(|event| convert_event(event))
-}
+    let parser = Parser::new(markdown);
+    // Track link/image state: (is_link, is_image, url)
+    let mut link_state: Option<(bool, bool, String)> = None;
+    let mut link_text = String::new();
 
-fn convert_event(event: MdEvent) -> Event {
-    match event {
-        MdEvent::Start(tag) => {
-            match tag {
-                Tag::Strong => Event::StrongStart,
-                Tag::Emphasis => Event::EmphasisStart,
-                _ => Event::Start(convert_tag(tag)),
+    parser.flat_map(move |event| {
+        let mut result = Vec::new();
+
+        match event {
+            MdEvent::Start(tag) => {
+                match tag {
+                    Tag::Link { dest_url, .. } => {
+                        // Start of a link - store the URL and track state
+                        link_state = Some((true, false, dest_url.to_string()));
+                        link_text.clear();
+                    }
+                    Tag::Image { dest_url, .. } => {
+                        // Start of an image - store the URL and track state
+                        link_state = Some((false, true, dest_url.to_string()));
+                        link_text.clear();
+                    }
+                    Tag::Strong => {
+                        result.push(Event::StrongStart);
+                    }
+                    Tag::Emphasis => {
+                        result.push(Event::EmphasisStart);
+                    }
+                    _ => {
+                        result.push(Event::Start(convert_tag(tag)));
+                    }
+                }
             }
-        }
-        MdEvent::End(tag) => {
-            match tag {
-                TagEnd::Strong => Event::StrongEnd,
-                TagEnd::Emphasis => Event::EmphasisEnd,
-                _ => Event::End(convert_tag_end(tag)),
+            MdEvent::End(tag) => {
+                match tag {
+                    TagEnd::Link => {
+                        // End of a link - emit the Link event with text and URL
+                        if let Some((true, false, url)) = link_state.take() {
+                            result.push(Event::Link {
+                                text: link_text.clone(),
+                                url,
+                            });
+                        } else {
+                            // Fallback (shouldn't happen in well-formed markdown)
+                            if !link_text.is_empty() {
+                                result.push(Event::Text(link_text.clone()));
+                            }
+                        }
+                        link_text.clear();
+                    }
+                    TagEnd::Image => {
+                        // End of an image - emit the Image event with alt and URL
+                        if let Some((false, true, url)) = link_state.take() {
+                            result.push(Event::Image {
+                                alt: link_text.clone(),
+                                url,
+                            });
+                        } else {
+                            // Fallback
+                            if !link_text.is_empty() {
+                                result.push(Event::Text(link_text.clone()));
+                            }
+                        }
+                        link_text.clear();
+                    }
+                    TagEnd::Strong => {
+                        result.push(Event::StrongEnd);
+                    }
+                    TagEnd::Emphasis => {
+                        result.push(Event::EmphasisEnd);
+                    }
+                    _ => {
+                        result.push(Event::End(convert_tag_end(tag)));
+                    }
+                }
             }
+            MdEvent::Text(text) => {
+                if link_state.is_some() {
+                    // Accumulate text for link/image
+                    link_text.push_str(&text);
+                } else {
+                    result.push(Event::Text(text.to_string()));
+                }
+            }
+            MdEvent::SoftBreak => result.push(Event::SoftBreak),
+            MdEvent::HardBreak => result.push(Event::HardBreak),
+            MdEvent::Rule => result.push(Event::Rule),
+            MdEvent::Code(code) => result.push(Event::InlineCode(code.to_string())),
+            MdEvent::InlineMath(_) => result.push(Event::Text(String::new())),
+            MdEvent::DisplayMath(_) => result.push(Event::Text(String::new())),
+            MdEvent::Html(_) => result.push(Event::Text(String::new())),
+            MdEvent::InlineHtml(_) => result.push(Event::Text(String::new())),
+            MdEvent::FootnoteReference(_) => result.push(Event::Text(String::new())),
+            MdEvent::TaskListMarker(_) => result.push(Event::Text(String::new())),
         }
-        MdEvent::Text(text) => Event::Text(text.to_string()),
-        MdEvent::SoftBreak => Event::SoftBreak,
-        MdEvent::HardBreak => Event::HardBreak,
-        MdEvent::Rule => Event::Rule,
-        MdEvent::Code(code) => Event::InlineCode(code.to_string()),
-        MdEvent::InlineMath(_) => Event::Text(String::new()), // Simplified
-        MdEvent::DisplayMath(_) => Event::Text(String::new()), // Simplified
-        MdEvent::Html(_) => Event::Text(String::new()), // Simplified: ignore HTML
-        MdEvent::InlineHtml(_) => Event::Text(String::new()),
-        MdEvent::FootnoteReference(_) => Event::Text(String::new()), // Simplified
-        MdEvent::TaskListMarker(_) => Event::Text(String::new()), // Simplified
-    }
+
+        // Return iterator
+        result.into_iter()
+    })
 }
 
 fn convert_tag(tag: Tag) -> Block {
