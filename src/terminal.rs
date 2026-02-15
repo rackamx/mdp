@@ -129,14 +129,14 @@ pub struct Size {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::Mutex;
 
     struct MockTerminalOps {
         fail_enable: AtomicBool,
         fail_size: AtomicBool,
         disable_calls: AtomicUsize,
         flush_calls: AtomicUsize,
-        hook: Mutex<Option<Box<dyn Fn() + Send + Sync + 'static>>>,
+        panic_hook_installs: AtomicUsize,
+        run_cleanup_on_install: AtomicBool,
     }
 
     impl MockTerminalOps {
@@ -146,14 +146,9 @@ mod tests {
                 fail_size: AtomicBool::new(false),
                 disable_calls: AtomicUsize::new(0),
                 flush_calls: AtomicUsize::new(0),
-                hook: Mutex::new(None),
+                panic_hook_installs: AtomicUsize::new(0),
+                run_cleanup_on_install: AtomicBool::new(false),
             })
-        }
-
-        fn trigger_panic_cleanup(&self) {
-            if let Some(hook) = self.hook.lock().expect("lock hook").as_ref() {
-                hook();
-            }
         }
     }
 
@@ -183,7 +178,12 @@ mod tests {
         }
 
         fn install_panic_hook(&self, cleanup: Box<dyn Fn() + Send + Sync + 'static>) {
-            *self.hook.lock().expect("lock hook") = Some(cleanup);
+            self.panic_hook_installs.fetch_add(1, Ordering::SeqCst);
+            // Optionally execute cleanup once to exercise panic-cleanup path
+            // without retaining a closure that would create an Arc cycle.
+            if self.run_cleanup_on_install.load(Ordering::SeqCst) {
+                cleanup();
+            }
         }
     }
 
@@ -257,13 +257,18 @@ mod tests {
     #[test]
     fn test_panic_hook_cleanup_uses_disable_path_without_tty() {
         let ops = MockTerminalOps::new();
+        ops.run_cleanup_on_install.store(true, Ordering::SeqCst);
         let terminal = Terminal::new_with_ops(ops.clone()).expect("terminal should be created");
 
-        ops.trigger_panic_cleanup();
         assert_eq!(
             ops.disable_calls.load(Ordering::SeqCst),
             1,
-            "Expected panic cleanup hook to call disable_raw_mode once"
+            "Expected panic cleanup path to call disable_raw_mode once"
+        );
+        assert_eq!(
+            ops.panic_hook_installs.load(Ordering::SeqCst),
+            1,
+            "Expected one panic hook installation"
         );
 
         drop(terminal);
