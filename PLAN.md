@@ -233,6 +233,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_page_up()` - verify content scrolls up one page
   - `test_progress_indicator()` - verify "more" indicator shows at bottom
 
+**Status**: DONE
+
 ---
 
 ### T13 - Navigation
