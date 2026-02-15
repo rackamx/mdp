@@ -1068,6 +1068,30 @@ mod tests {
             key_event_to_action(crossterm::event::KeyCode::Char('h')),
             PagerKeyAction::ShowHelp
         );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('k')),
+            PagerKeyAction::ScrollUp
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char(' ')),
+            PagerKeyAction::PageDown
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('g')),
+            PagerKeyAction::GoToBeginning
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('G')),
+            PagerKeyAction::GoToEnd
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('n')),
+            PagerKeyAction::SearchNext
+        );
+        assert_eq!(
+            key_event_to_action(crossterm::event::KeyCode::Char('N')),
+            PagerKeyAction::SearchPrevious
+        );
     }
 
     #[test]
@@ -1376,6 +1400,23 @@ mod tests {
         let code = run_with_env(&args, &mut io, &mut interactive);
         assert_eq!(code, 2);
         assert!(io.err.contains("Error reading stdin"));
+    }
+
+    #[test]
+    fn test_run_with_env_clap_parse_error_writes_stderr() {
+        let args = vec!["mdp".to_string(), "--definitely-invalid-flag".to_string()];
+        let mut io = MockAppIo {
+            stdin_tty: true,
+            stdout_tty: true,
+            ..Default::default()
+        };
+        let mut interactive = MockInteractiveRunner::default();
+        let code = run_with_env(&args, &mut io, &mut interactive);
+        assert_ne!(code, 0, "invalid flag should return non-zero exit");
+        assert!(
+            !io.err.is_empty(),
+            "expected clap parse error message on stderr output sink"
+        );
     }
 
     #[test]
