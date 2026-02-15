@@ -78,6 +78,12 @@ pub struct Renderer {
     in_footnote_definition: bool,
     /// Whether the footnote section separator has already been rendered
     footnote_section_started: bool,
+    /// Whether we're currently inside an HTML block
+    in_html_block: bool,
+    /// Whether the next heading should be rendered underlined (Setext source)
+    pending_heading_setext: bool,
+    /// Whether the current heading is underlined
+    current_heading_underlined: bool,
 }
 
 impl Renderer {
@@ -233,6 +239,9 @@ impl Renderer {
             in_definition_entry: false,
             in_footnote_definition: false,
             footnote_section_started: false,
+            in_html_block: false,
+            pending_heading_setext: false,
+            current_heading_underlined: false,
         }
     }
 
@@ -273,6 +282,9 @@ impl Renderer {
         self.in_definition_entry = false;
         self.in_footnote_definition = false;
         self.footnote_section_started = false;
+        self.in_html_block = false;
+        self.pending_heading_setext = false;
+        self.current_heading_underlined = false;
     }
 
     /// Render markdown events to lines.
@@ -340,6 +352,30 @@ impl Renderer {
 
     /// Process a single markdown event
     fn process_event(&mut self, event: &Event) {
+        if self.in_html_block {
+            match event {
+                Event::Text(text) => {
+                    if !self.current_line.is_empty() {
+                        self.render_newline();
+                    }
+                    self.render_html_block_text(text);
+                    return;
+                }
+                Event::SoftBreak | Event::HardBreak => {
+                    self.render_newline();
+                    return;
+                }
+                Event::RawHtml(html) => {
+                    if !self.current_line.is_empty() {
+                        self.render_newline();
+                    }
+                    self.render_raw_html(html);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         match event {
             Event::Text(text) => self.render_text(text),
             Event::SoftBreak => self.render_space(),
@@ -363,6 +399,8 @@ impl Renderer {
             Event::OrderedListItemMarker(number) => self.pending_ordered_list_number = Some(*number),
             Event::ListItemPrecededByBlankLine => self.pending_list_item_blank_before = true,
             Event::InterBlockBlankLines(count) => self.render_interblock_blank_lines(*count),
+            Event::ReferenceDefinition(line) => self.render_reference_definition(line),
+            Event::HeadingSetext(is_setext) => self.pending_heading_setext = *is_setext,
         }
     }
 
@@ -376,6 +414,45 @@ impl Renderer {
             self.cursor_col = 0;
         }
         self.pending_interblock_blank_lines = count;
+    }
+
+    fn render_html_block_text(&mut self, text: &str) {
+        let segments: Vec<&str> = text.split_terminator('\n').collect();
+        for (idx, segment) in segments.iter().enumerate() {
+            self.current_line.push_str(segment);
+            self.cursor_col += Self::display_width(segment);
+            if idx + 1 < segments.len() {
+                self.render_newline();
+            }
+        }
+        if text.ends_with('\n') {
+            self.render_newline();
+        }
+    }
+
+    fn render_reference_definition(&mut self, line: &str) {
+        if !self.current_line.is_empty() {
+            self.lines.push(self.current_line.clone());
+            self.current_line.clear();
+            self.cursor_col = 0;
+        }
+        if self.pending_interblock_blank_lines > 0 {
+            let trailing_empty = self
+                .lines
+                .iter()
+                .rev()
+                .take_while(|line| line.is_empty())
+                .count();
+            if trailing_empty < self.pending_interblock_blank_lines {
+                for _ in 0..(self.pending_interblock_blank_lines - trailing_empty) {
+                    self.lines.push(String::new());
+                }
+            }
+            self.pending_interblock_blank_lines = 0;
+        }
+        let rendered = Self::render_reference_definition_with_underlined_url(line)
+            .unwrap_or_else(|| line.to_string());
+        self.lines.push(rendered);
     }
 
     /// Render text content with word wrapping
@@ -617,7 +694,7 @@ impl Renderer {
             return;
         }
 
-        if !html.starts_with('\n') && !html.starts_with("</") {
+        if !self.in_html_block && !html.starts_with('\n') && !html.starts_with("</") {
             self.maybe_insert_space_before_inline();
         }
 
@@ -641,13 +718,7 @@ impl Renderer {
     /// Render a link as "text (url)"
     fn render_link(&mut self, text: &str, url: &str, source: &str) {
         if !source.is_empty() {
-            let rendered = if source.starts_with('[') && self.current_line.ends_with('!') {
-                // Escaped image-like text is parsed as literal '!' plus a link.
-                // Keep original markdown-like form without underlining destination.
-                source.to_string()
-            } else {
-                Self::render_link_source_with_underlined_url(source, url)
-            };
+            let rendered = Self::render_link_source_with_underlined_url(source, url);
             if self.in_table_cell {
                 self.current_table_cell.push_str(&rendered);
                 return;
@@ -935,6 +1006,7 @@ impl Renderer {
                     | crate::parsing::Block::List { .. }
                     | crate::parsing::Block::Table { .. }
                     | crate::parsing::Block::DefinitionList
+                    | crate::parsing::Block::HtmlBlock
             );
 
             // Add a blank line only for major block boundaries.
@@ -1020,6 +1092,9 @@ impl Renderer {
                 self.current_line.push_str("  ");
                 self.cursor_col += 2;
             }
+            crate::parsing::Block::HtmlBlock => {
+                self.in_html_block = true;
+            }
             _ => {}
         }
 
@@ -1041,12 +1116,16 @@ impl Renderer {
                 if self.in_block_quote && self.current_line.is_empty() {
                     self.push_block_quote_prefix();
                 }
-                // Track heading level and start bold + underline
+                // Track heading level and start bold
                 self.heading_level = *level;
                 self.heading_text.clear();
                 // Start heading style
                 self.render_bold_start();
-                self.current_line.push_str("\x1b[4m");
+                self.current_heading_underlined = self.pending_heading_setext;
+                self.pending_heading_setext = false;
+                if self.current_heading_underlined {
+                    self.current_line.push_str("\x1b[4m");
+                }
                 // Keep Markdown heading markers visible.
                 let marker = "#".repeat(usize::from(*level));
                 self.current_line.push_str(&marker);
@@ -1172,7 +1251,10 @@ impl Renderer {
             | crate::parsing::Block::FootnoteDefinition { .. }
             | crate::parsing::Block::DefinitionList
             | crate::parsing::Block::DefinitionListTitle
-            | crate::parsing::Block::DefinitionListDefinition => {}
+            | crate::parsing::Block::DefinitionListDefinition
+            | crate::parsing::Block::HtmlBlock
+            | crate::parsing::Block::MetadataBlock
+            | crate::parsing::Block::InlineIgnored => {}
         }
     }
 
@@ -1181,7 +1263,9 @@ impl Renderer {
         match block {
             crate::parsing::Block::Heading { level: _, text: _ } => {
                 // End heading style.
-                self.current_line.push_str("\x1b[24m");
+                if self.current_heading_underlined {
+                    self.current_line.push_str("\x1b[24m");
+                }
                 self.render_bold_end();
 
                 if !self.current_line.is_empty() {
@@ -1192,6 +1276,7 @@ impl Renderer {
 
                 // Reset heading state
                 self.heading_level = 0;
+                self.current_heading_underlined = false;
             }
             crate::parsing::Block::CodeBlock { info: _, indented: _ } => {
                 if self.code_block_content_indent > 0 {
@@ -1322,6 +1407,14 @@ impl Renderer {
                 if self.in_footnote_definition {
                     self.current_line.push_str("\x1b[0m");
                     self.in_footnote_definition = false;
+                }
+            }
+            crate::parsing::Block::HtmlBlock => {
+                self.in_html_block = false;
+                if !self.current_line.is_empty() {
+                    self.lines.push(self.current_line.clone());
+                    self.current_line.clear();
+                    self.cursor_col = 0;
                 }
             }
             _ => {

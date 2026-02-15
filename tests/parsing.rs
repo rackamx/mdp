@@ -177,49 +177,34 @@ fn test_parse_ordered_list_item_markers() {
 }
 
 #[test]
-fn test_parse_reference_definition_line_as_text_event() {
+fn test_parse_reference_definition_line_as_reference_event() {
     let markdown = "[id]: https://example.com\n";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, Event::Text(s) if s.contains("[id]: https://example.com"))),
-        "Expected reference definition line preserved as text event, got: {:?}",
+            .any(|e| matches!(e, Event::ReferenceDefinition(s) if s.contains("[id]: https://example.com"))),
+        "Expected reference definition line preserved as reference event, got: {:?}",
         events
     );
 }
 
 #[test]
-fn test_parse_consecutive_reference_definitions_as_single_paragraph_with_breaks() {
+fn test_parse_consecutive_reference_definitions_as_distinct_events() {
     let markdown = "[id1]: https://example.com/one\n[id2]: https://example.com/two\n";
     let events: Vec<Event> = parse_markdown(markdown).collect();
 
-    let paragraph_starts = events
+    let defs = events
         .iter()
-        .filter(|e| matches!(e, Event::Start(mdp::parsing::Block::Paragraph)))
-        .count();
-    let paragraph_ends = events
-        .iter()
-        .filter(|e| matches!(e, Event::End(mdp::parsing::Block::Paragraph)))
-        .count();
-    let hard_breaks = events
-        .iter()
-        .filter(|e| matches!(e, Event::HardBreak))
+        .filter_map(|e| match e {
+            Event::ReferenceDefinition(s) => Some(s),
+            _ => None,
+        })
         .count();
 
     assert_eq!(
-        paragraph_starts, 1,
-        "Expected one paragraph start for consecutive definitions, got: {:?}",
-        events
-    );
-    assert_eq!(
-        paragraph_ends, 1,
-        "Expected one paragraph end for consecutive definitions, got: {:?}",
-        events
-    );
-    assert_eq!(
-        hard_breaks, 1,
-        "Expected hard break between two definition lines, got: {:?}",
+        defs, 2,
+        "Expected two reference definition events, got: {:?}",
         events
     );
 }
@@ -233,6 +218,17 @@ fn test_parse_emits_interblock_blank_line_count_for_multiple_blank_lines() {
             .iter()
             .any(|e| matches!(e, Event::InterBlockBlankLines(2))),
         "Expected InterBlockBlankLines(2) event, got: {:?}",
+        events
+    );
+}
+
+#[test]
+fn test_parse_marks_setext_heading_style() {
+    let markdown = "Setext H1\n=========\n\nATX\n";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    assert!(
+        events.iter().any(|e| matches!(e, Event::HeadingSetext(true))),
+        "Expected HeadingSetext(true) event for setext heading, got: {:?}",
         events
     );
 }

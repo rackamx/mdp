@@ -364,7 +364,7 @@ fn test_render_overlapping_emphasis_keeps_outer_italics_active() {
     );
 }
 
-/// Test h1 heading rendering with ANSI underline
+/// Test h1 heading rendering
 #[test]
 fn test_render_h1() {
     let markdown = "# Title";
@@ -384,15 +384,15 @@ fn test_render_h1() {
         "Expected Markdown heading marker in output, got: {:?}",
         output
     );
-    // Should use ANSI underline
+    // Heading styling should not rely on underline anymore
     assert!(
-        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
-        "Expected ANSI underline codes in output, got: {:?}",
+        !output.contains("\x1b[4m") && !output.contains("\x1b[24m"),
+        "Expected no ANSI underline codes for headings, got: {:?}",
         output
     );
 }
 
-/// Test h2 heading rendering with ANSI underline
+/// Test h2 heading rendering
 #[test]
 fn test_render_h2() {
     let markdown = "## Section";
@@ -412,10 +412,9 @@ fn test_render_h2() {
         "Expected Markdown heading marker in output, got: {:?}",
         output
     );
-    // Should use ANSI underline
     assert!(
-        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
-        "Expected ANSI underline codes in output, got: {:?}",
+        !output.contains("\x1b[4m") && !output.contains("\x1b[24m"),
+        "Expected no ANSI underline codes for headings, got: {:?}",
         output
     );
 }
@@ -433,10 +432,9 @@ fn test_render_h3_to_h6() {
         "Expected 'Heading 3' in output, got: {:?}",
         output
     );
-    // h3 should be underlined inline
     assert!(
-        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
-        "Expected ANSI underline for h3 in output, got: {:?}",
+        !output.contains("\x1b[4m") && !output.contains("\x1b[24m"),
+        "Expected no ANSI underline for h3 heading, got: {:?}",
         output
     );
 
@@ -503,7 +501,7 @@ fn test_render_heading_bold() {
 }
 
 #[test]
-fn test_heading_underline_matches_visible_heading_width() {
+fn test_heading_renders_as_single_line_without_underline() {
     let markdown = "# Heading Width";
     let events: Vec<Event> = parse_markdown(markdown).collect();
 
@@ -516,8 +514,8 @@ fn test_heading_underline_matches_visible_heading_width() {
         output
     );
     assert!(
-        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
-        "Expected inline ANSI underline for heading, got: {:?}",
+        !output.contains("\x1b[4m") && !output.contains("\x1b[24m"),
+        "Expected no ANSI underline for heading, got: {:?}",
         output
     );
 }
@@ -542,6 +540,30 @@ fn test_render_consecutive_atx_headings_have_no_blank_lines_between() {
 
     assert_eq!(h2, h1 + 1, "Unexpected blank line between H1 and H2: {:?}", plain);
     assert_eq!(h3, h2 + 1, "Unexpected blank line between H2 and H3: {:?}", plain);
+}
+
+#[test]
+fn test_render_setext_heading_keeps_underline() {
+    let markdown = "Setext H1\n=========\n\nSetext H2\n---------";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let lines: Vec<&str> = output.lines().collect();
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("\x1b[4m# Setext H1") && line.contains("\x1b[24m")),
+        "Expected setext h1 heading to be underlined, got: {:?}",
+        output
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("\x1b[4m## Setext H2") && line.contains("\x1b[24m")),
+        "Expected setext h2 heading to be underlined, got: {:?}",
+        output
+    );
 }
 
 fn strip_ansi(input: &str) -> String {
@@ -2199,7 +2221,7 @@ fn test_render_inline_code_surrounded_by_spaces_variant() {
 }
 
 #[test]
-fn test_render_blockquote_heading_underline_keeps_quote_prefix() {
+fn test_render_blockquote_heading_keeps_quote_prefix() {
     let markdown = "> ## Quoted";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(80);
@@ -2213,8 +2235,8 @@ fn test_render_blockquote_heading_underline_keeps_quote_prefix() {
         plain
     );
     assert!(
-        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
-        "Expected inline ANSI underline within quoted heading, got: {:?}",
+        !output.contains("\x1b[4m") && !output.contains("\x1b[24m"),
+        "Expected no ANSI underline within quoted heading, got: {:?}",
         output
     );
 }

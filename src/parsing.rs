@@ -56,6 +56,10 @@ pub enum Event {
     /// Extra blank lines in source between adjacent block-level elements
     /// beyond the single semantic paragraph separator.
     InterBlockBlankLines(usize),
+    /// Source reference definition line (e.g. `[id]: https://...`)
+    ReferenceDefinition(String),
+    /// Indicates whether the next heading came from Setext syntax
+    HeadingSetext(bool),
 }
 
 /// Block elements in markdown
@@ -89,6 +93,12 @@ pub enum Block {
     DefinitionListTitle,
     /// Definition list definition/content
     DefinitionListDefinition,
+    /// HTML block container
+    HtmlBlock,
+    /// Metadata block
+    MetadataBlock,
+    /// Inline-only tags that are handled through dedicated inline events
+    InlineIgnored,
 }
 
 /// Table cell alignment
@@ -141,6 +151,15 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                         link_state = Some((false, true, dest_url.to_string(), range.start));
                         link_text.clear();
                     }
+                    Tag::Heading { level, .. } => {
+                        let is_setext = heading_is_setext_at_offset(
+                            markdown,
+                            range.start,
+                            matches!(level, pulldown_cmark::HeadingLevel::H1),
+                        );
+                        out.push(Event::HeadingSetext(is_setext));
+                        out.push(Event::Start(convert_tag(tag)));
+                    }
                     Tag::Strong => {
                         out.push(Event::StrongStart);
                     }
@@ -187,8 +206,12 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                     TagEnd::Link => {
                         // End of a link - emit the Link event with text and URL
                         if let Some((true, false, url, start_offset)) = link_state.take() {
-                            let source =
-                                extract_link_source_from_markdown(markdown, start_offset, range.end);
+                            let mut source = extract_source_from_range(markdown, start_offset, range.end);
+                            if is_escaped_image_like_link(markdown, start_offset)
+                                && source.starts_with('[')
+                            {
+                                source.insert(0, '!');
+                            }
                             out.push(Event::Link {
                                 text: link_text.clone(),
                                 url,
@@ -205,11 +228,7 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                     TagEnd::Image => {
                         // End of an image - emit the Image event with alt and URL
                         if let Some((false, true, url, start_offset)) = link_state.take() {
-                            let source = extract_image_source_from_markdown(
-                                markdown,
-                                start_offset,
-                                range.end,
-                            );
+                            let source = extract_source_from_range(markdown, start_offset, range.end);
                             out.push(Event::Image {
                                 alt: link_text.clone(),
                                 url,
@@ -246,30 +265,7 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                     // Accumulate text for link/image
                     link_text.push_str(&text);
                 } else {
-                    let raw = markdown.get(range.start..range.end).unwrap_or_default();
-                    let line = line_at_offset(markdown, range.start);
-                    if raw.contains("\\[") || raw.contains("\\]") {
-                        out.push(Event::Text(raw.to_string()));
-                    } else if line.contains("\\[")
-                        && line.contains("\\]")
-                        && text.contains('[')
-                        && text.contains(']')
-                        && !text.contains("\\[")
-                    {
-                        let with_open = text.replacen('[', "\\[", 1);
-                        let with_both = with_open.replacen(']', "\\]", 1);
-                        out.push(Event::Text(with_both));
-                    } else if text.starts_with('[') && text.ends_with(']') {
-                        let inner = text.trim_start_matches('[').trim_end_matches(']');
-                        let pattern = format!("\\[{inner}\\]");
-                        if line.contains(&pattern) {
-                            out.push(Event::Text(pattern));
-                        } else {
-                            out.push(Event::Text(text.to_string()));
-                        }
-                    } else {
-                        out.push(Event::Text(text.to_string()));
-                    }
+                    out.push(Event::Text(text.to_string()));
                 }
             }
             MdEvent::SoftBreak => out.push(Event::SoftBreak),
@@ -350,72 +346,17 @@ fn list_item_has_blank_line_before_at_offset(markdown: &str, mut offset: usize) 
     prev_line.trim().is_empty()
 }
 
-fn extract_link_source_from_markdown(markdown: &str, start: usize, fallback_end: usize) -> String {
-    if start >= markdown.len() {
+fn extract_source_from_range(markdown: &str, start: usize, end: usize) -> String {
+    if start >= markdown.len() || end <= start {
         return String::new();
     }
-
-    let tail = &markdown[start..];
-    if let Some(rest) = tail.strip_prefix('<') {
-        if let Some(close) = rest.find('>') {
-            return format!("<{}>", &rest[..close]);
-        }
-    }
-    if let Some(rest) = tail.strip_prefix('[') {
-        if let Some(label_close_rel) = rest.find(']') {
-            let label_close = 1 + label_close_rel;
-            let after = &tail[label_close + 1..];
-            if let Some(after_paren) = after.strip_prefix('(') {
-                if let Some(paren_close_rel) = after_paren.find(')') {
-                    return tail[..label_close + 3 + paren_close_rel].to_string();
-                }
-            }
-            if let Some(after_bracket) = after.strip_prefix('[') {
-                if let Some(ref_close_rel) = after_bracket.find(']') {
-                    return tail[..label_close + 3 + ref_close_rel].to_string();
-                }
-            }
-            return tail[..label_close + 1].to_string();
-        }
-    }
-
-    markdown
-        .get(start..fallback_end)
-        .unwrap_or_default()
-        .to_string()
+    markdown.get(start..end).unwrap_or_default().to_string()
 }
 
-fn extract_image_source_from_markdown(markdown: &str, start: usize, fallback_end: usize) -> String {
-    if start >= markdown.len() {
-        return String::new();
-    }
-    let tail = &markdown[start..];
-    let Some(rest) = tail.strip_prefix("![") else {
-        return markdown
-            .get(start..fallback_end)
-            .unwrap_or_default()
-            .to_string();
-    };
-
-    let Some(label_close_rel) = rest.find(']') else {
-        return markdown
-            .get(start..fallback_end)
-            .unwrap_or_default()
-            .to_string();
-    };
-    let label_close = 2 + label_close_rel; // "![" (2) + rel idx
-    let after = &tail[label_close + 1..];
-    if let Some(after_paren) = after.strip_prefix('(') {
-        if let Some(paren_close_rel) = after_paren.find(')') {
-            return tail[..label_close + 3 + paren_close_rel].to_string();
-        }
-    }
-    if let Some(after_bracket) = after.strip_prefix('[') {
-        if let Some(ref_close_rel) = after_bracket.find(']') {
-            return tail[..label_close + 3 + ref_close_rel].to_string();
-        }
-    }
-    tail[..label_close + 1].to_string()
+fn is_escaped_image_like_link(markdown: &str, start: usize) -> bool {
+    start >= 2
+        && markdown.as_bytes().get(start - 1) == Some(&b'!')
+        && markdown.as_bytes().get(start - 2) == Some(&b'\\')
 }
 
 fn emit_reference_definition_gap_events(
@@ -452,14 +393,9 @@ fn emit_reference_definition_gap_events(
         out.push(Event::InterBlockBlankLines(leading_blank_lines));
     }
 
-    out.push(Event::Start(Block::Paragraph));
-    for (idx, line) in defs.iter().enumerate() {
-        out.push(Event::Text((*line).to_string()));
-        if idx + 1 < defs.len() {
-            out.push(Event::HardBreak);
-        }
+    for line in defs {
+        out.push(Event::ReferenceDefinition(line.to_string()));
     }
-    out.push(Event::End(Block::Paragraph));
 }
 
 fn should_emit_inter_block_blank_lines_before_event(
@@ -649,6 +585,38 @@ fn reference_definition_line(line: &str) -> bool {
     !after_colon.is_empty()
 }
 
+fn heading_is_setext_at_offset(markdown: &str, mut offset: usize, is_h1: bool) -> bool {
+    if markdown.is_empty() {
+        return false;
+    }
+    if offset >= markdown.len() {
+        offset = markdown.len().saturating_sub(1);
+    }
+
+    let current_start = markdown[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let current_end = markdown[offset..]
+        .find('\n')
+        .map_or(markdown.len(), |i| offset + i);
+    if current_end >= markdown.len() {
+        return false;
+    }
+    let next_start = current_end + 1;
+    let next_end = markdown[next_start..]
+        .find('\n')
+        .map_or(markdown.len(), |i| next_start + i);
+    let _current_line = &markdown[current_start..current_end];
+    let marker_line = markdown[next_start..next_end].trim();
+    if marker_line.is_empty() {
+        return false;
+    }
+
+    if is_h1 {
+        marker_line.chars().all(|ch| ch == '=')
+    } else {
+        marker_line.chars().all(|ch| ch == '-')
+    }
+}
+
 fn convert_tag(tag: Tag) -> Block {
     match tag {
         Tag::Heading { level, .. } => Block::Heading {
@@ -682,16 +650,16 @@ fn convert_tag(tag: Tag) -> Block {
         Tag::TableRow => Block::TableRow,
         Tag::TableCell => Block::TableCell,
         Tag::TableHead => Block::TableHead,
-        Tag::Emphasis => Block::Paragraph, // Inline - simplified
-        Tag::Strong => Block::Paragraph,   // Inline - simplified
-        Tag::Strikethrough => Block::Paragraph, // Inline - simplified
-        Tag::Link { .. } => Block::Paragraph, // Inline - simplified
-        Tag::Image { .. } => Block::Paragraph, // Inline - simplified
-        Tag::HtmlBlock => Block::Paragraph, // Simplified
+        Tag::Emphasis => Block::InlineIgnored,
+        Tag::Strong => Block::InlineIgnored,
+        Tag::Strikethrough => Block::InlineIgnored,
+        Tag::Link { .. } => Block::InlineIgnored,
+        Tag::Image { .. } => Block::InlineIgnored,
+        Tag::HtmlBlock => Block::HtmlBlock,
         Tag::DefinitionList => Block::DefinitionList,
         Tag::DefinitionListTitle => Block::DefinitionListTitle,
         Tag::DefinitionListDefinition => Block::DefinitionListDefinition,
-        Tag::MetadataBlock(_) => Block::Paragraph, // Simplified
+        Tag::MetadataBlock(_) => Block::MetadataBlock,
     }
 }
 
@@ -715,19 +683,19 @@ fn convert_tag_end(tag: TagEnd) -> Block {
         TagEnd::TableRow => Block::TableRow,
         TagEnd::TableCell => Block::TableCell,
         TagEnd::TableHead => Block::TableHead,
-        TagEnd::Emphasis => Block::Paragraph,
-        TagEnd::Strong => Block::Paragraph,
-        TagEnd::Strikethrough => Block::Paragraph,
-        TagEnd::Link => Block::Paragraph,
-        TagEnd::Image => Block::Paragraph,
-        TagEnd::HtmlBlock => Block::Paragraph,
+        TagEnd::Emphasis => Block::InlineIgnored,
+        TagEnd::Strong => Block::InlineIgnored,
+        TagEnd::Strikethrough => Block::InlineIgnored,
+        TagEnd::Link => Block::InlineIgnored,
+        TagEnd::Image => Block::InlineIgnored,
+        TagEnd::HtmlBlock => Block::HtmlBlock,
         TagEnd::FootnoteDefinition => Block::FootnoteDefinition {
             label: String::new(),
         },
         TagEnd::DefinitionList => Block::DefinitionList,
         TagEnd::DefinitionListTitle => Block::DefinitionListTitle,
         TagEnd::DefinitionListDefinition => Block::DefinitionListDefinition,
-        TagEnd::MetadataBlock(_) => Block::Paragraph,
+        TagEnd::MetadataBlock(_) => Block::MetadataBlock,
     }
 }
 

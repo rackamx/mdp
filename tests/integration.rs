@@ -19,7 +19,7 @@ fn test_full_render_sample_snapshot() {
 
     assert!(output.status.success(), "mdp should exit successfully");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let expected = "\x1b[1m\x1b[4m# Snapshot Title\x1b[24m\x1b[22m\n\nPlain text.\n";
+    let expected = "\x1b[1m# Snapshot Title\x1b[22m\n\nPlain text.\n";
     assert_eq!(stdout, expected, "rendered output snapshot mismatch");
 }
 
