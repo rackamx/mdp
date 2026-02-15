@@ -534,12 +534,31 @@ fn test_render_consecutive_atx_headings_have_no_blank_lines_between() {
         "Expected at least three heading lines, got: {:?}",
         plain
     );
-    let h1 = lines.iter().position(|l| l.contains("# H1")).expect("Missing H1");
-    let h2 = lines.iter().position(|l| l.contains("## H2")).expect("Missing H2");
-    let h3 = lines.iter().position(|l| l.contains("### H3")).expect("Missing H3");
+    let h1 = lines
+        .iter()
+        .position(|l| l.contains("# H1"))
+        .expect("Missing H1");
+    let h2 = lines
+        .iter()
+        .position(|l| l.contains("## H2"))
+        .expect("Missing H2");
+    let h3 = lines
+        .iter()
+        .position(|l| l.contains("### H3"))
+        .expect("Missing H3");
 
-    assert_eq!(h2, h1 + 1, "Unexpected blank line between H1 and H2: {:?}", plain);
-    assert_eq!(h3, h2 + 1, "Unexpected blank line between H2 and H3: {:?}", plain);
+    assert_eq!(
+        h2,
+        h1 + 1,
+        "Unexpected blank line between H1 and H2: {:?}",
+        plain
+    );
+    assert_eq!(
+        h3,
+        h2 + 1,
+        "Unexpected blank line between H2 and H3: {:?}",
+        plain
+    );
 }
 
 #[test]
@@ -1251,7 +1270,8 @@ fn test_render_link_with_inline_code_label_no_duplicate_code_prefix() {
 
 #[test]
 fn test_render_reference_definitions_without_blank_lines_and_with_underlined_urls() {
-    let markdown = "[id1]: https://example.com/ref \"Ref One\"\n[id2]: https://example.com/collapsed\n";
+    let markdown =
+        "[id1]: https://example.com/ref \"Ref One\"\n[id2]: https://example.com/collapsed\n";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(120);
     let output = renderer.render(&events);
@@ -2443,12 +2463,16 @@ fn test_render_ordered_list_preserves_source_markers() {
     let lines: Vec<&str> = plain.lines().collect();
 
     assert!(
-        lines.iter().any(|line| line.trim_start().starts_with("3. starts at three")),
+        lines
+            .iter()
+            .any(|line| line.trim_start().starts_with("3. starts at three")),
         "Expected first ordered item to keep source marker 3., got: {:?}",
         plain
     );
     assert!(
-        lines.iter().any(|line| line.trim_start().starts_with("4. next item")),
+        lines
+            .iter()
+            .any(|line| line.trim_start().starts_with("4. next item")),
         "Expected second ordered item to keep source marker 4., got: {:?}",
         plain
     );
@@ -2494,11 +2518,17 @@ fn test_render_mixed_list_content_preserves_softbreak_line_in_item() {
 
     let first_idx = lines
         .iter()
-        .position(|line| line.trim_start().starts_with("- item with paragraph continuation"))
+        .position(|line| {
+            line.trim_start()
+                .starts_with("- item with paragraph continuation")
+        })
         .expect("Expected first list line");
     let second_idx = lines
         .iter()
-        .position(|line| line.trim_start().starts_with("still same list item paragraph"))
+        .position(|line| {
+            line.trim_start()
+                .starts_with("still same list item paragraph")
+        })
         .expect("Expected continuation list line");
     assert_eq!(
         second_idx,

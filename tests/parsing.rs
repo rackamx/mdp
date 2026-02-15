@@ -227,7 +227,9 @@ fn test_parse_marks_setext_heading_style() {
     let markdown = "Setext H1\n=========\n\nATX\n";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     assert!(
-        events.iter().any(|e| matches!(e, Event::HeadingSetext(true))),
+        events
+            .iter()
+            .any(|e| matches!(e, Event::HeadingSetext(true))),
         "Expected HeadingSetext(true) event for setext heading, got: {:?}",
         events
     );
@@ -245,7 +247,9 @@ fn test_parse_inline_code_with_inner_backticks_and_spaces() {
         })
         .collect();
     assert!(
-        code_events.iter().any(|c| c.contains("surrounded by spaces")),
+        code_events
+            .iter()
+            .any(|c| c.contains("surrounded by spaces")),
         "Expected inline code event for spaced/backtick sample, got: {:?}",
         events
     );

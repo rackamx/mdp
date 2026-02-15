@@ -75,9 +75,7 @@ fn test_interactive_help_and_search_in_pty() {
     writer.flush().expect("flush help key");
     thread::sleep(Duration::from_millis(80));
 
-    writer
-        .write_all(b" ")
-        .expect("failed to leave help screen");
+    writer.write_all(b" ").expect("failed to leave help screen");
     writer.flush().expect("flush leave-help key");
     thread::sleep(Duration::from_millis(80));
 

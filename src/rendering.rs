@@ -90,14 +90,10 @@ impl Renderer {
     fn needs_space_before_token(token: &str, prev_visible_char: Option<char>) -> bool {
         // Punctuation should "stick" to the previous token.
         match token.chars().next() {
-            Some(':')
-            | Some(';')
-            | Some(',')
-            | Some('.')
-            | Some(')')
-            | Some(']')
-            | Some('}')
-            | Some('%') => !prev_visible_char.map(|c| c.is_alphanumeric()).unwrap_or(false),
+            Some(':') | Some(';') | Some(',') | Some('.') | Some(')') | Some(']') | Some('}')
+            | Some('%') => !prev_visible_char
+                .map(|c| c.is_alphanumeric())
+                .unwrap_or(false),
             _ => true,
         }
     }
@@ -396,7 +392,9 @@ impl Renderer {
             Event::TaskListMarker(checked) => self.render_task_marker(*checked),
             Event::FootnoteReference(label) => self.render_footnote_reference(label),
             Event::ListItemMarker(marker) => self.pending_unordered_list_marker = Some(*marker),
-            Event::OrderedListItemMarker(number) => self.pending_ordered_list_number = Some(*number),
+            Event::OrderedListItemMarker(number) => {
+                self.pending_ordered_list_number = Some(*number)
+            }
             Event::ListItemPrecededByBlankLine => self.pending_list_item_blank_before = true,
             Event::InterBlockBlankLines(count) => self.render_interblock_blank_lines(*count),
             Event::ReferenceDefinition(line) => self.render_reference_definition(line),
@@ -467,7 +465,9 @@ impl Renderer {
             processed = Self::apply_strikethrough_fallback(&processed);
         }
 
-        if let Some(rendered_ref_def) = Self::render_reference_definition_with_underlined_url(&processed) {
+        if let Some(rendered_ref_def) =
+            Self::render_reference_definition_with_underlined_url(&processed)
+        {
             if self.in_table_cell {
                 self.current_table_cell.push_str(&rendered_ref_def);
             } else {
@@ -1210,7 +1210,10 @@ impl Renderer {
                 let marker = if let Some((ordered, next_number)) = self.list_stack.last_mut() {
                     self.list_is_ordered = *ordered;
                     if *ordered {
-                        let display_number = self.pending_ordered_list_number.take().unwrap_or(*next_number);
+                        let display_number = self
+                            .pending_ordered_list_number
+                            .take()
+                            .unwrap_or(*next_number);
                         let marker = format!("{display_number}. ");
                         *next_number = display_number.saturating_add(1);
                         self.list_item_number = *next_number;
@@ -1278,7 +1281,10 @@ impl Renderer {
                 self.heading_level = 0;
                 self.current_heading_underlined = false;
             }
-            crate::parsing::Block::CodeBlock { info: _, indented: _ } => {
+            crate::parsing::Block::CodeBlock {
+                info: _,
+                indented: _,
+            } => {
                 if self.code_block_content_indent > 0 {
                     // Indented code blocks: no opening/closing fences.
                     if !self.current_line.is_empty() {
