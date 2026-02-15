@@ -8,6 +8,7 @@ use mdp::pager::{Pager, PagerConfig};
 use mdp::parsing::parse_markdown;
 use mdp::rendering::Renderer;
 use mdp::terminal::Terminal;
+use std::env;
 use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
@@ -47,6 +48,7 @@ enum InputLoadError {
     ReadStdin(io::Error),
 }
 
+#[cfg(test)]
 fn load_input<FReadStdin, FReadFile>(
     file_arg: Option<&str>,
     stdin_is_terminal: bool,
@@ -93,7 +95,14 @@ fn main() {
 }
 
 fn run() -> i32 {
-    let matches = Command::new("mdp")
+    let args: Vec<String> = env::args().collect();
+    let mut io = RealAppIo;
+    let mut interactive = RealInteractiveRunner;
+    run_with_env(&args, &mut io, &mut interactive)
+}
+
+fn build_cli() -> Command {
+    Command::new("mdp")
         .version(env!("CARGO_PKG_VERSION"))
         .arg(
             Arg::new("file")
@@ -133,7 +142,131 @@ fn run() -> i32 {
                 .default_value("50")
                 .help("Number of benchmark iterations"),
         )
-        .get_matches();
+}
+
+trait AppIo {
+    fn stdin_is_terminal(&self) -> bool;
+    fn stdout_is_terminal(&self) -> bool;
+    fn read_stdin(&mut self) -> Result<String, io::Error>;
+    fn read_file(&mut self, path: &str) -> Result<String, io::Error>;
+    fn write_stdout(&mut self, text: &str);
+    fn write_stderr(&mut self, text: &str);
+}
+
+struct RealAppIo;
+
+impl AppIo for RealAppIo {
+    fn stdin_is_terminal(&self) -> bool {
+        io::stdin().is_terminal()
+    }
+
+    fn stdout_is_terminal(&self) -> bool {
+        io::stdout().is_terminal()
+    }
+
+    fn read_stdin(&mut self) -> Result<String, io::Error> {
+        read_stdin()
+    }
+
+    fn read_file(&mut self, path: &str) -> Result<String, io::Error> {
+        read_file(path)
+    }
+
+    fn write_stdout(&mut self, text: &str) {
+        print!("{text}");
+    }
+
+    fn write_stderr(&mut self, text: &str) {
+        eprint!("{text}");
+    }
+}
+
+trait InteractiveRunner {
+    fn run_interactive(
+        &mut self,
+        markdown: String,
+        width_override: Option<usize>,
+        strikethrough_fallback: bool,
+        source_label: &str,
+        reload_path: Option<&str>,
+    ) -> Result<(), io::Error>;
+}
+
+struct RealInteractiveRunner;
+
+impl InteractiveRunner for RealInteractiveRunner {
+    fn run_interactive(
+        &mut self,
+        markdown: String,
+        width_override: Option<usize>,
+        strikethrough_fallback: bool,
+        source_label: &str,
+        reload_path: Option<&str>,
+    ) -> Result<(), io::Error> {
+        run_interactive_pager(
+            markdown,
+            width_override,
+            strikethrough_fallback,
+            source_label,
+            reload_path,
+        )
+    }
+}
+
+fn load_input_with_io(
+    file_arg: Option<&str>,
+    stdin_is_terminal: bool,
+    io: &mut impl AppIo,
+) -> Result<LoadedInput, InputLoadError> {
+    match file_arg {
+        Some("-") => {
+            let markdown = io.read_stdin().map_err(InputLoadError::ReadStdin)?;
+            Ok(LoadedInput {
+                markdown,
+                source_label: source_label_for_arg(Some("-")),
+                reload_path: None,
+            })
+        }
+        Some(file_path) => {
+            let markdown = io.read_file(file_path).map_err(InputLoadError::ReadFile)?;
+            Ok(LoadedInput {
+                markdown,
+                source_label: source_label_for_arg(Some(file_path)),
+                reload_path: Some(file_path.to_string()),
+            })
+        }
+        None => {
+            if stdin_is_terminal {
+                return Err(InputLoadError::Usage);
+            }
+            let markdown = io.read_stdin().map_err(InputLoadError::ReadStdin)?;
+            Ok(LoadedInput {
+                markdown,
+                source_label: source_label_for_arg(None),
+                reload_path: None,
+            })
+        }
+    }
+}
+
+fn run_with_env(
+    args: &[String],
+    app_io: &mut impl AppIo,
+    interactive: &mut impl InteractiveRunner,
+) -> i32 {
+    let matches = match build_cli().try_get_matches_from(args.iter().map(String::as_str)) {
+        Ok(m) => m,
+        Err(e) => {
+            let msg = e.to_string();
+            let code = e.exit_code();
+            if code == 0 {
+                app_io.write_stdout(&msg);
+            } else {
+                app_io.write_stderr(&msg);
+            }
+            return code;
+        }
+    };
     let width_override = matches.get_one::<usize>("width").copied();
     let strikethrough_fallback = !matches.get_flag("ansi-strikethrough");
     let benchmark_mode = matches.get_flag("benchmark");
@@ -141,23 +274,22 @@ fn run() -> i32 {
         .get_one::<usize>("bench-iters")
         .expect("bench-iters has a default value");
 
-    let loaded = match load_input(
+    let loaded = match load_input_with_io(
         matches.get_one::<String>("file").map(String::as_str),
-        io::stdin().is_terminal(),
-        &read_stdin,
-        &read_file,
+        app_io.stdin_is_terminal(),
+        app_io,
     ) {
         Ok(loaded) => loaded,
         Err(InputLoadError::Usage) => {
-            println!("Usage: mdp <file>");
+            app_io.write_stdout("Usage: mdp <file>\n");
             return 0;
         }
         Err(InputLoadError::ReadFile(e)) => {
-            eprintln!("Error reading file: {e}");
+            app_io.write_stderr(&format!("Error reading file: {e}\n"));
             return 1;
         }
         Err(InputLoadError::ReadStdin(e)) => {
-            eprintln!("Error reading stdin: {e}");
+            app_io.write_stderr(&format!("Error reading stdin: {e}\n"));
             return 2;
         }
     };
@@ -170,21 +302,21 @@ fn run() -> i32 {
     if benchmark_mode {
         let width = width_override.unwrap_or_else(detect_default_width);
         let report = run_benchmark(&markdown, width, strikethrough_fallback, bench_iters);
-        println!("{report}");
+        app_io.write_stdout(&format!("{report}\n"));
         return 0;
     }
 
-    if !io::stdout().is_terminal() || !io::stdin().is_terminal() {
+    if !app_io.stdout_is_terminal() || !app_io.stdin_is_terminal() {
         let rendered = render_markdown(
             &markdown,
             width_override.unwrap_or_else(detect_default_width),
             strikethrough_fallback,
         );
-        println!("{rendered}");
+        app_io.write_stdout(&format!("{rendered}\n"));
         return 0;
     }
 
-    match run_interactive_pager(
+    match interactive.run_interactive(
         markdown,
         width_override,
         strikethrough_fallback,
@@ -194,7 +326,7 @@ fn run() -> i32 {
         Ok(()) => 0,
         Err(e) if e.kind() == io::ErrorKind::Interrupted => interrupted_exit_code(),
         Err(e) => {
-            eprintln!("Terminal error: {e}");
+            app_io.write_stderr(&format!("Terminal error: {e}\n"));
             2
         }
     }
@@ -656,10 +788,11 @@ fn source_label_for_arg(file_arg: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_navigation_action, build_footer_line, build_pager, default_width_for_cols,
-        interrupted_exit_code, key_event_to_action, load_input, looks_binary, reload_markdown,
-        render_markdown_lines, run_benchmark, source_label_for_arg, InputLoadError,
-        PagerKeyAction, PagerNavigation, SIGINT_RECEIVED,
+        apply_navigation_action, apply_prompt_key, build_footer_line, build_help_screen_lines,
+        build_pager, default_width_for_cols, draw_page_with_writer, interrupted_exit_code,
+        key_event_to_action, load_input, looks_binary, reload_markdown, render_markdown_lines,
+        run_benchmark, run_with_env, source_label_for_arg, FrameCache, InputLoadError,
+        PagerKeyAction, PagerNavigation, PromptAction, SIGINT_RECEIVED,
     };
     use mdp::pager::{Pager, PagerConfig};
     use std::collections::VecDeque;
@@ -1041,6 +1174,8 @@ mod tests {
     struct MockEventSource {
         poll_responses: VecDeque<bool>,
         events: VecDeque<crossterm::event::Event>,
+        poll_error: Option<io::ErrorKind>,
+        read_error: Option<io::ErrorKind>,
     }
 
     impl MockEventSource {
@@ -1048,12 +1183,17 @@ mod tests {
             Self {
                 poll_responses: VecDeque::new(),
                 events: events.into(),
+                poll_error: None,
+                read_error: None,
             }
         }
     }
 
     impl super::EventSource for MockEventSource {
         fn poll(&mut self, _timeout: std::time::Duration) -> Result<bool, io::Error> {
+            if let Some(kind) = self.poll_error.take() {
+                return Err(io::Error::new(kind, "poll error"));
+            }
             if let Some(v) = self.poll_responses.pop_front() {
                 return Ok(v);
             }
@@ -1061,6 +1201,9 @@ mod tests {
         }
 
         fn read(&mut self) -> Result<crossterm::event::Event, io::Error> {
+            if let Some(kind) = self.read_error.take() {
+                return Err(io::Error::new(kind, "read error"));
+            }
             self.events
                 .pop_front()
                 .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "no events"))
@@ -1074,6 +1217,10 @@ mod tests {
         cleared: bool,
         prompt_queue: VecDeque<Option<String>>,
         statuses: Vec<Option<String>>,
+        draw_error: Option<io::ErrorKind>,
+        help_error: Option<io::ErrorKind>,
+        prompt_error: Option<io::ErrorKind>,
+        clear_error: Option<io::ErrorKind>,
     }
 
     impl super::PagerScreen for MockScreen {
@@ -1084,6 +1231,9 @@ mod tests {
             status_message: Option<&str>,
             _cache: &mut super::FrameCache,
         ) -> Result<(), io::Error> {
+            if let Some(kind) = self.draw_error.take() {
+                return Err(io::Error::new(kind, "draw error"));
+            }
             self.draw_count += 1;
             self.statuses
                 .push(status_message.map(std::string::ToString::to_string));
@@ -1095,15 +1245,24 @@ mod tests {
             _pager: &Pager,
             _source_label: &str,
         ) -> Result<Option<String>, io::Error> {
+            if let Some(kind) = self.prompt_error.take() {
+                return Err(io::Error::new(kind, "prompt error"));
+            }
             Ok(self.prompt_queue.pop_front().unwrap_or(None))
         }
 
         fn draw_help(&mut self, _help_lines: &[String]) -> Result<(), io::Error> {
+            if let Some(kind) = self.help_error.take() {
+                return Err(io::Error::new(kind, "help error"));
+            }
             self.help_calls += 1;
             Ok(())
         }
 
         fn clear(&mut self) -> Result<(), io::Error> {
+            if let Some(kind) = self.clear_error.take() {
+                return Err(io::Error::new(kind, "clear error"));
+            }
             self.cleared = true;
             Ok(())
         }
@@ -1114,6 +1273,250 @@ mod tests {
             code,
             crossterm::event::KeyModifiers::NONE,
         ))
+    }
+
+    struct MockAppIo {
+        stdin_tty: bool,
+        stdout_tty: bool,
+        stdin_data: Result<String, io::ErrorKind>,
+        file_data: Result<String, io::ErrorKind>,
+        out: String,
+        err: String,
+    }
+
+    impl Default for MockAppIo {
+        fn default() -> Self {
+            Self {
+                stdin_tty: false,
+                stdout_tty: false,
+                stdin_data: Ok(String::new()),
+                file_data: Ok(String::new()),
+                out: String::new(),
+                err: String::new(),
+            }
+        }
+    }
+
+    impl super::AppIo for MockAppIo {
+        fn stdin_is_terminal(&self) -> bool {
+            self.stdin_tty
+        }
+        fn stdout_is_terminal(&self) -> bool {
+            self.stdout_tty
+        }
+        fn read_stdin(&mut self) -> Result<String, io::Error> {
+            self.stdin_data
+                .clone()
+                .map_err(|k| io::Error::new(k, "stdin read error"))
+        }
+        fn read_file(&mut self, _path: &str) -> Result<String, io::Error> {
+            self.file_data
+                .clone()
+                .map_err(|k| io::Error::new(k, "file read error"))
+        }
+        fn write_stdout(&mut self, text: &str) {
+            self.out.push_str(text);
+        }
+        fn write_stderr(&mut self, text: &str) {
+            self.err.push_str(text);
+        }
+    }
+
+    #[derive(Default)]
+    struct MockInteractiveRunner {
+        result: Option<Result<(), io::ErrorKind>>,
+        called: usize,
+    }
+
+    impl super::InteractiveRunner for MockInteractiveRunner {
+        fn run_interactive(
+            &mut self,
+            _markdown: String,
+            _width_override: Option<usize>,
+            _strikethrough_fallback: bool,
+            _source_label: &str,
+            _reload_path: Option<&str>,
+        ) -> Result<(), io::Error> {
+            self.called += 1;
+            match self.result.take().unwrap_or(Ok(())) {
+                Ok(()) => Ok(()),
+                Err(kind) => Err(io::Error::new(kind, "interactive error")),
+            }
+        }
+    }
+
+    #[test]
+    fn test_run_with_env_usage_path() {
+        let args = vec!["mdp".to_string()];
+        let mut io = MockAppIo {
+            stdin_tty: true,
+            stdout_tty: true,
+            stdin_data: Ok(String::new()),
+            file_data: Ok(String::new()),
+            ..Default::default()
+        };
+        let mut interactive = MockInteractiveRunner::default();
+        let code = run_with_env(&args, &mut io, &mut interactive);
+        assert_eq!(code, 0);
+        assert!(io.out.contains("Usage: mdp <file>"));
+        assert_eq!(interactive.called, 0);
+    }
+
+    #[test]
+    fn test_run_with_env_stdin_read_error_path() {
+        let args = vec!["mdp".to_string()];
+        let mut io = MockAppIo {
+            stdin_tty: false,
+            stdout_tty: false,
+            stdin_data: Err(io::ErrorKind::BrokenPipe),
+            file_data: Ok(String::new()),
+            ..Default::default()
+        };
+        let mut interactive = MockInteractiveRunner::default();
+        let code = run_with_env(&args, &mut io, &mut interactive);
+        assert_eq!(code, 2);
+        assert!(io.err.contains("Error reading stdin"));
+    }
+
+    #[test]
+    fn test_run_with_env_interactive_error_mappings() {
+        let args = vec!["mdp".to_string(), "-".to_string()];
+        let mut io = MockAppIo {
+            stdin_tty: true,
+            stdout_tty: true,
+            stdin_data: Ok("doc".to_string()),
+            file_data: Ok(String::new()),
+            ..Default::default()
+        };
+        let mut interactive = MockInteractiveRunner {
+            result: Some(Err(io::ErrorKind::Interrupted)),
+            called: 0,
+        };
+        let code = run_with_env(&args, &mut io, &mut interactive);
+        assert_eq!(code, 130);
+
+        let mut io2 = MockAppIo {
+            stdin_tty: true,
+            stdout_tty: true,
+            stdin_data: Ok("doc".to_string()),
+            file_data: Ok(String::new()),
+            ..Default::default()
+        };
+        let mut interactive2 = MockInteractiveRunner {
+            result: Some(Err(io::ErrorKind::Other)),
+            called: 0,
+        };
+        let code2 = run_with_env(&args, &mut io2, &mut interactive2);
+        assert_eq!(code2, 2);
+        assert!(io2.err.contains("Terminal error"));
+    }
+
+    #[derive(Default)]
+    struct MockFrameWriter {
+        ops: Vec<String>,
+        buf: String,
+    }
+
+    impl super::FrameWriter for MockFrameWriter {
+        fn move_to(&mut self, x: u16, y: u16) -> Result<(), io::Error> {
+            self.ops.push(format!("move:{x}:{y}"));
+            Ok(())
+        }
+        fn clear_current_line(&mut self) -> Result<(), io::Error> {
+            self.ops.push("clear_line".to_string());
+            Ok(())
+        }
+        fn clear_all(&mut self) -> Result<(), io::Error> {
+            self.ops.push("clear_all".to_string());
+            Ok(())
+        }
+        fn write_str(&mut self, s: &str) -> Result<(), io::Error> {
+            self.buf.push_str(s);
+            Ok(())
+        }
+        fn flush(&mut self) -> Result<(), io::Error> {
+            self.ops.push("flush".to_string());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_draw_page_with_writer_uses_cache_diffing() {
+        let mut pager = Pager::new(
+            PagerConfig {
+                page_size: 2,
+                cols: 80,
+            },
+            vec!["l1".to_string(), "l2".to_string(), "l3".to_string()],
+        );
+        let mut cache = FrameCache::default();
+        let mut writer = MockFrameWriter::default();
+
+        draw_page_with_writer(&pager, "doc.md", None, &mut cache, &mut writer).expect("draw ok");
+        let first_ops = writer.ops.len();
+        assert!(first_ops > 0);
+
+        writer.ops.clear();
+        draw_page_with_writer(&pager, "doc.md", None, &mut cache, &mut writer).expect("draw ok");
+        assert_eq!(
+            writer.ops,
+            vec!["flush".to_string()],
+            "second draw with identical frame should flush only"
+        );
+
+        pager.scroll_down();
+        writer.ops.clear();
+        draw_page_with_writer(&pager, "doc.md", None, &mut cache, &mut writer).expect("draw ok");
+        assert!(
+            writer.ops.iter().any(|op| op.starts_with("move:")),
+            "scroll changed frame so move ops are expected"
+        );
+    }
+
+    #[test]
+    fn test_prompt_key_state_machine() {
+        let mut pattern = String::new();
+        assert_eq!(
+            apply_prompt_key(
+                &mut pattern,
+                crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Char('a'),
+                    crossterm::event::KeyModifiers::NONE
+                )
+            ),
+            PromptAction::Continue
+        );
+        assert_eq!(pattern, "a");
+        assert_eq!(
+            apply_prompt_key(
+                &mut pattern,
+                crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Backspace,
+                    crossterm::event::KeyModifiers::NONE
+                )
+            ),
+            PromptAction::Continue
+        );
+        assert_eq!(pattern, "");
+        assert_eq!(
+            apply_prompt_key(
+                &mut pattern,
+                crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Enter,
+                    crossterm::event::KeyModifiers::NONE
+                )
+            ),
+            PromptAction::Return(Some(String::new()))
+        );
+    }
+
+    #[test]
+    fn test_build_help_screen_lines_appends_footer() {
+        let lines = build_help_screen_lines(&["A".to_string(), "B".to_string()]);
+        assert_eq!(lines[0], "A");
+        assert_eq!(lines[1], "B");
+        assert_eq!(lines[2], "");
+        assert_eq!(lines[3], "Press any key to return");
     }
 
     #[test]
@@ -1285,15 +1688,218 @@ mod tests {
             "expected reload-unavailable status to be drawn"
         );
     }
+
+    #[test]
+    fn test_interactive_core_propagates_event_poll_error() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![]);
+        events.poll_error = Some(io::ErrorKind::TimedOut);
+        let mut screen = MockScreen::default();
+        let mut markdown = "body".to_string();
+        let err = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        )
+        .expect_err("poll error should propagate");
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn test_interactive_core_propagates_event_read_error() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![]);
+        events.poll_responses.push_back(true);
+        events.read_error = Some(io::ErrorKind::UnexpectedEof);
+        let mut screen = MockScreen::default();
+        let mut markdown = "body".to_string();
+        let err = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        )
+        .expect_err("read error should propagate");
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn test_interactive_core_propagates_draw_error() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![]);
+        let mut screen = MockScreen {
+            draw_error: Some(io::ErrorKind::WriteZero),
+            ..Default::default()
+        };
+        let mut markdown = "body".to_string();
+        let err = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        )
+        .expect_err("draw error should propagate");
+        assert_eq!(err.kind(), io::ErrorKind::WriteZero);
+    }
+
+    #[test]
+    fn test_interactive_core_propagates_help_error() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![
+            key_press(crossterm::event::KeyCode::Char('h')),
+        ]);
+        let mut screen = MockScreen {
+            help_error: Some(io::ErrorKind::Other),
+            ..Default::default()
+        };
+        let mut markdown = "body".to_string();
+        let err = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        )
+        .expect_err("help error should propagate");
+        assert_eq!(err.kind(), io::ErrorKind::Other);
+    }
+
+    #[test]
+    fn test_interactive_core_propagates_prompt_error() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![
+            key_press(crossterm::event::KeyCode::Char('/')),
+        ]);
+        let mut screen = MockScreen {
+            prompt_error: Some(io::ErrorKind::ConnectionReset),
+            ..Default::default()
+        };
+        let mut markdown = "body".to_string();
+        let err = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        )
+        .expect_err("prompt error should propagate");
+        assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
+    }
+
+    #[test]
+    fn test_interactive_core_propagates_clear_error() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![
+            key_press(crossterm::event::KeyCode::Char('q')),
+        ]);
+        let mut screen = MockScreen {
+            clear_error: Some(io::ErrorKind::BrokenPipe),
+            ..Default::default()
+        };
+        let mut markdown = "body".to_string();
+        let err = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        )
+        .expect_err("clear error should propagate");
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+    }
 }
 
-fn draw_page(
+trait FrameWriter {
+    fn move_to(&mut self, x: u16, y: u16) -> Result<(), io::Error>;
+    fn clear_current_line(&mut self) -> Result<(), io::Error>;
+    fn clear_all(&mut self) -> Result<(), io::Error>;
+    fn write_str(&mut self, s: &str) -> Result<(), io::Error>;
+    fn flush(&mut self) -> Result<(), io::Error>;
+}
+
+struct CrosstermFrameWriter {
+    stdout: io::Stdout,
+}
+
+impl CrosstermFrameWriter {
+    fn new() -> Self {
+        Self { stdout: io::stdout() }
+    }
+}
+
+impl FrameWriter for CrosstermFrameWriter {
+    fn move_to(&mut self, x: u16, y: u16) -> Result<(), io::Error> {
+        self.stdout.execute(MoveTo(x, y))?;
+        Ok(())
+    }
+
+    fn clear_current_line(&mut self) -> Result<(), io::Error> {
+        self.stdout.execute(Clear(ClearType::CurrentLine))?;
+        Ok(())
+    }
+
+    fn clear_all(&mut self) -> Result<(), io::Error> {
+        self.stdout.execute(Clear(ClearType::All))?;
+        Ok(())
+    }
+
+    fn write_str(&mut self, s: &str) -> Result<(), io::Error> {
+        write!(self.stdout, "{s}")?;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), io::Error> {
+        self.stdout.flush()
+    }
+}
+
+fn draw_page_with_writer(
     pager: &Pager,
     source_label: &str,
     status_message: Option<&str>,
     cache: &mut FrameCache,
+    writer: &mut impl FrameWriter,
 ) -> Result<(), io::Error> {
-    let mut stdout = io::stdout();
     let page_size = pager.page_size();
     let (start, end) = pager.visible_range();
     let mut body_lines = Vec::with_capacity(page_size);
@@ -1306,26 +1912,36 @@ fn draw_page(
 
     for row in 0..page_size {
         if cache.body_lines.get(row) != body_lines.get(row) {
-            stdout.execute(MoveTo(HORIZONTAL_PADDING, row as u16))?;
-            stdout.execute(Clear(ClearType::CurrentLine))?;
+            writer.move_to(HORIZONTAL_PADDING, row as u16)?;
+            writer.clear_current_line()?;
             if let Some(line) = body_lines.get(row) {
-                write!(stdout, "\x1b[0m{line}")?;
+                writer.write_str(&format!("\x1b[0m{line}"))?;
             }
         }
     }
 
     let footer = build_footer_line(pager, source_label, status_message);
     if cache.footer != footer {
-        stdout.execute(MoveTo(HORIZONTAL_PADDING, page_size as u16))?;
-        stdout.execute(Clear(ClearType::CurrentLine))?;
-        write!(stdout, "\x1b[0m{footer}")?;
+        writer.move_to(HORIZONTAL_PADDING, page_size as u16)?;
+        writer.clear_current_line()?;
+        writer.write_str(&format!("\x1b[0m{footer}"))?;
     }
 
     cache.body_lines = body_lines;
     cache.footer = footer;
-    stdout.flush()?;
+    writer.flush()?;
     Ok(())
 }
+
+fn draw_page(
+    pager: &Pager,
+    source_label: &str,
+    status_message: Option<&str>,
+    cache: &mut FrameCache,
+) -> Result<(), io::Error> {
+        let mut writer = CrosstermFrameWriter::new();
+        draw_page_with_writer(pager, source_label, status_message, cache, &mut writer)
+    }
 
 fn build_footer_line(pager: &Pager, source_label: &str, status_message: Option<&str>) -> String {
     let mut footer = if let Some(indicator) = pager.progress_indicator() {
@@ -1365,42 +1981,64 @@ fn prompt_search(pager: &Pager, source_label: &str) -> Result<Option<String>, io
             _ => continue,
         };
 
-        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-            continue;
-        }
-
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "SIGINT"));
-        }
-
-        match key.code {
-            KeyCode::Enter => return Ok(Some(pattern)),
-            KeyCode::Esc => return Ok(None),
-            KeyCode::Backspace => {
-                pattern.pop();
+        match apply_prompt_key(&mut pattern, key) {
+            PromptAction::Continue => continue,
+            PromptAction::Return(v) => return Ok(v),
+            PromptAction::Interrupt => {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "SIGINT"));
             }
-            KeyCode::Char(ch) => {
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT)
-                {
-                    pattern.push(ch);
-                }
-            }
-            _ => {}
         }
     }
 }
 
-fn draw_help(help_lines: &[String]) -> Result<(), io::Error> {
-    let mut stdout = io::stdout();
-    stdout.execute(MoveTo(0, 0))?;
-    stdout.execute(Clear(ClearType::All))?;
-    for line in help_lines {
-        write!(stdout, "{line}\r\n")?;
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PromptAction {
+    Continue,
+    Return(Option<String>),
+    Interrupt,
+}
+
+fn apply_prompt_key(pattern: &mut String, key: crossterm::event::KeyEvent) -> PromptAction {
+    if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+        return PromptAction::Continue;
     }
-    write!(stdout, "\r\n")?;
-    write!(stdout, "Press any key to return\r\n")?;
-    stdout.flush()?;
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return PromptAction::Interrupt;
+    }
+    match key.code {
+        KeyCode::Enter => PromptAction::Return(Some(pattern.clone())),
+        KeyCode::Esc => PromptAction::Return(None),
+        KeyCode::Backspace => {
+            pattern.pop();
+            PromptAction::Continue
+        }
+        KeyCode::Char(ch) => {
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+            {
+                pattern.push(ch);
+            }
+            PromptAction::Continue
+        }
+        _ => PromptAction::Continue,
+    }
+}
+
+fn build_help_screen_lines(help_lines: &[String]) -> Vec<String> {
+    let mut lines = help_lines.to_vec();
+    lines.push(String::new());
+    lines.push("Press any key to return".to_string());
+    lines
+}
+
+fn draw_help(help_lines: &[String]) -> Result<(), io::Error> {
+    let mut writer = CrosstermFrameWriter::new();
+    writer.move_to(0, 0)?;
+    writer.clear_all()?;
+    for line in build_help_screen_lines(help_lines) {
+        writer.write_str(&format!("{line}\r\n"))?;
+    }
+    writer.flush()?;
     let _ = event::read()?;
     Ok(())
 }
