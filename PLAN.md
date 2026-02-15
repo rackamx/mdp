@@ -72,6 +72,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
 - `tests/terminal.rs`:
   - `test_terminal_cleanup()` - verify terminal restores on panic (can use RAII pattern test)
 
+**Status**: DONE
+
 ---
 
 ### T05 - Basic Text Rendering
