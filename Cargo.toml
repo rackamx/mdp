@@ -1,0 +1,9 @@
+[package]
+name = "mdless"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pulldown-cmark = "0.12"
+crossterm = "0.28"
+clap = "4.5"
