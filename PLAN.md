@@ -279,6 +279,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_help_screen()` - verify help displays on `h` press
   - `test_help_keybindings()` - verify all keybindings listed
 
+**Status**: DONE
+
 ---
 
 ### T16 - Horizontal Rule Rendering

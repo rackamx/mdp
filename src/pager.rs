@@ -311,6 +311,30 @@ impl Pager {
         self.search_matches.clear();
         self.current_match_index = None;
     }
+
+    /// Get the help text displaying all available keybindings
+    pub fn help_text(&self) -> Vec<String> {
+        vec![
+            "Keybindings:".to_string(),
+            "".to_string(),
+            "Navigation:".to_string(),
+            "  j, down, Enter  - Move down one line".to_string(),
+            "  k, up           - Move up one line".to_string(),
+            "  space, f, PageDown - Page down".to_string(),
+            "  b, PageUp       - Page up".to_string(),
+            "  g, Home         - Go to beginning".to_string(),
+            "  G, End          - Go to end".to_string(),
+            "".to_string(),
+            "Search:".to_string(),
+            "  /               - Search forward".to_string(),
+            "  n               - Next search match".to_string(),
+            "  N               - Previous search match".to_string(),
+            "".to_string(),
+            "Other:".to_string(),
+            "  h, ?            - Show this help".to_string(),
+            "  q, Q, ZZ        - Quit".to_string(),
+        ]
+    }
 }
 
 #[cfg(test)]

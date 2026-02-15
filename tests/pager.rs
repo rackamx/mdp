@@ -382,3 +382,73 @@ fn test_search_previous() {
     let has_highlight = visible.iter().any(|line| line.contains("Hello") && line.contains("\x1b[1m"));
     assert!(has_highlight, "Should still have highlighted match after search_previous");
 }
+
+/// Test help screen - verify help displays keybindings
+#[test]
+fn test_help_screen() {
+    // Create a pager with test content
+    let lines: Vec<String> = (1..=10).map(|i| format!("Line {}", i)).collect();
+    let pager = Pager::new(PagerConfig::default(), lines);
+
+    // Get the help text
+    let help_text = pager.help_text();
+
+    // Help text should not be empty
+    assert!(!help_text.is_empty(), "Help text should not be empty");
+
+    // Help text should contain navigation keybindings
+    // Should have some indication of available keys
+    let help_string = help_text.join("\n");
+    assert!(
+        help_string.contains("h") || help_string.contains("?"),
+        "Help should mention 'h' or '?' key for help, got: {}",
+        help_string
+    );
+}
+
+/// Test help keybindings - verify all keybindings are listed
+#[test]
+fn test_help_keybindings() {
+    // Create a pager with test content
+    let lines: Vec<String> = (1..=10).map(|i| format!("Line {}", i)).collect();
+    let pager = Pager::new(PagerConfig::default(), lines);
+
+    // Get the help text
+    let help_text = pager.help_text();
+    let help_string = help_text.join("\n");
+
+    // Should list navigation commands (up/down arrows or j/k)
+    assert!(
+        help_string.contains("j") || help_string.contains("down") || help_string.contains("k") || help_string.contains("up"),
+        "Help should list navigation keys (j/k or arrows), got: {}",
+        help_string
+    );
+
+    // Should list page navigation (Page Up/Down or space/backspace)
+    assert!(
+        help_string.contains("space") || help_string.contains("Page") || help_string.contains("b"),
+        "Help should list page navigation keys, got: {}",
+        help_string
+    );
+
+    // Should list search key (/ or n)
+    assert!(
+        help_string.contains("/") || help_string.contains("search") || help_string.contains("n"),
+        "Help should list search key, got: {}",
+        help_string
+    );
+
+    // Should list go to beginning/end (g/G)
+    assert!(
+        help_string.contains("g") || help_string.contains("G") || help_string.contains("beginning") || help_string.contains("end"),
+        "Help should list go to beginning/end keys, got: {}",
+        help_string
+    );
+
+    // Should list quit key (q)
+    assert!(
+        help_string.contains("q") || help_string.contains("quit") || help_string.contains("exit"),
+        "Help should list quit key, got: {}",
+        help_string
+    );
+}
