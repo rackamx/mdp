@@ -44,6 +44,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_file_not_found()` - verify error handling for missing file
   - `test_no_argument_prints_usage()` - verify usage message when no args
 
+**Status**: DONE
+
 ---
 
 ### T03 - Markdown Parsing
