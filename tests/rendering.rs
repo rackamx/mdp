@@ -172,3 +172,95 @@ fn test_render_italics_mixed() {
     assert!(output.contains("\x1b[0m"),
             "Expected italics off code \\x1b[0m in output, got: {:?}", output);
 }
+
+/// Test h1 heading rendering with === underline
+#[test]
+fn test_render_h1() {
+    let markdown = "# Title";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the heading text
+    assert!(output.contains("Title"),
+            "Expected 'Title' in output, got: {:?}", output);
+    // Should have === underline (at least 3 characters for a 5-letter word)
+    assert!(output.contains("==="),
+            "Expected '===' underline in output, got: {:?}", output);
+}
+
+/// Test h2 heading rendering with --- underline
+#[test]
+fn test_render_h2() {
+    let markdown = "## Section";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the heading text
+    assert!(output.contains("Section"),
+            "Expected 'Section' in output, got: {:?}", output);
+    // Should have --- underline
+    assert!(output.contains("---"),
+            "Expected '---' underline in output, got: {:?}", output);
+}
+
+/// Test h3-h6 heading rendering
+#[test]
+fn test_render_h3_to_h6() {
+    // Test h3
+    let markdown = "### Heading 3";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    assert!(output.contains("Heading 3"),
+            "Expected 'Heading 3' in output, got: {:?}", output);
+    // h3 uses ~ underline
+    assert!(output.contains("~~~"),
+            "Expected '~~~' underline for h3 in output, got: {:?}", output);
+
+    // Test h4
+    let markdown = "#### Heading 4";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    assert!(output.contains("Heading 4"),
+            "Expected 'Heading 4' in output, got: {:?}", output);
+
+    // Test h5
+    let markdown = "##### Heading 5";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    assert!(output.contains("Heading 5"),
+            "Expected 'Heading 5' in output, got: {:?}", output);
+
+    // Test h6
+    let markdown = "###### Heading 6";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    assert!(output.contains("Heading 6"),
+            "Expected 'Heading 6' in output, got: {:?}", output);
+}
+
+/// Test heading text is bolded
+#[test]
+fn test_render_heading_bold() {
+    let markdown = "# Bold Title";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the heading text
+    assert!(output.contains("Bold Title"),
+            "Expected 'Bold Title' in output, got: {:?}", output);
+    // Should have bold formatting codes
+    assert!(output.contains("\x1b[1m"),
+            "Expected bold on code \\x1b[1m in output, got: {:?}", output);
+    assert!(output.contains("\x1b[0m"),
+            "Expected bold off code \\x1b[0m in output, got: {:?}", output);
+}

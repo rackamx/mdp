@@ -132,6 +132,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_h3_to_h6()` - verify heading markers for h3-h6
   - `test_render_heading_bold()` - verify heading text is bolded
 
+**Status**: DONE
+
 ---
 
 ### T08 - Code Block Rendering

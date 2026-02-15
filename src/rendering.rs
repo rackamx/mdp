@@ -10,6 +10,10 @@ pub struct Renderer {
     lines: Vec<String>,
     /// Current line being built
     current_line: String,
+    /// Current heading level (0 if not in a heading)
+    heading_level: u8,
+    /// Heading text collected so far
+    heading_text: String,
 }
 
 impl Renderer {
@@ -20,6 +24,8 @@ impl Renderer {
             cursor_col: 0,
             lines: Vec::new(),
             current_line: String::new(),
+            heading_level: 0,
+            heading_text: String::new(),
         }
     }
 
@@ -29,6 +35,8 @@ impl Renderer {
         self.lines.clear();
         self.current_line.clear();
         self.cursor_col = 0;
+        self.heading_level = 0;
+        self.heading_text.clear();
 
         for event in events {
             self.process_event(event);
@@ -155,8 +163,12 @@ impl Renderer {
         }
 
         match block {
-            crate::parsing::Block::Heading { level: _, text: _ } => {
-                // Heading will be rendered when we see the text
+            crate::parsing::Block::Heading { level, text: _ } => {
+                // Track heading level and start bold
+                self.heading_level = *level;
+                self.heading_text.clear();
+                // Start bold for heading
+                self.render_bold_start();
             }
             crate::parsing::Block::Paragraph => {
                 // Start of paragraph - no special handling needed
@@ -179,23 +191,34 @@ impl Renderer {
     /// Handle the end of a block element
     fn render_block_end(&mut self, block: &crate::parsing::Block) {
         match block {
-            crate::parsing::Block::Heading { level, text } => {
-                // Render heading with underline
-                let text = text.clone();
+            crate::parsing::Block::Heading { level: _, text: _ } => {
+                // End bold for heading
+                self.render_bold_end();
+
+                // Get the heading text from the current line (strip ANSI codes)
+                let heading_text = self.current_line.clone();
+                let text_len = heading_text
+                    .chars()
+                    .filter(|c| !c.is_ascii_control())
+                    .count();
+
                 if !self.current_line.is_empty() {
                     self.lines.push(self.current_line.clone());
                     self.current_line.clear();
                 }
 
-                // Add underline based on heading level
-                let underline = match level {
+                // Add underline based on heading level (use stored level)
+                let underline = match self.heading_level {
                     1 => "=",
                     2 => "-",
                     _ => "~",
                 };
-                let underline_str = underline.repeat(text.len().min(self.width));
+                let underline_str = underline.repeat(text_len.min(self.width));
                 self.lines.push(underline_str);
                 self.cursor_col = 0;
+
+                // Reset heading state
+                self.heading_level = 0;
             }
             _ => {
                 // For other blocks, just flush current line
