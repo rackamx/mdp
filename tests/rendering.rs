@@ -114,3 +114,61 @@ fn test_render_bold_mixed() {
     assert!(output.contains("\x1b[0m"),
             "Expected bold off code \\x1b[0m in output, got: {:?}", output);
 }
+
+/// Test italics text rendering with asterisks (*italic*)
+#[test]
+fn test_render_italics_asterisks() {
+    let markdown = "*italic*";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain ANSI italics codes
+    assert!(output.contains("\x1b[3m"),
+            "Expected italics on code \\x1b[3m in output, got: {:?}", output);
+    assert!(output.contains("\x1b[0m"),
+            "Expected italics off code \\x1b[0m in output, got: {:?}", output);
+    assert!(output.contains("italic"),
+            "Expected 'italic' text in output, got: {:?}", output);
+}
+
+/// Test italics text rendering with underscores (_italic_)
+#[test]
+fn test_render_italics_underscores() {
+    let markdown = "_italic_";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain ANSI italics codes
+    assert!(output.contains("\x1b[3m"),
+            "Expected italics on code \\x1b[3m in output, got: {:?}", output);
+    assert!(output.contains("\x1b[0m"),
+            "Expected italics off code \\x1b[0m in output, got: {:?}", output);
+    assert!(output.contains("italic"),
+            "Expected 'italic' text in output, got: {:?}", output);
+}
+
+/// Test mixed normal and italics text
+#[test]
+fn test_render_italics_mixed() {
+    let markdown = "normal *italic* normal";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain normal text
+    assert!(output.contains("normal"),
+            "Expected 'normal' text in output, got: {:?}", output);
+    // Should contain italics text
+    assert!(output.contains("italic"),
+            "Expected 'italic' text in output, got: {:?}", output);
+    // Should contain italics formatting codes
+    assert!(output.contains("\x1b[3m"),
+            "Expected italics on code \\x1b[3m in output, got: {:?}", output);
+    assert!(output.contains("\x1b[0m"),
+            "Expected italics off code \\x1b[0m in output, got: {:?}", output);
+}

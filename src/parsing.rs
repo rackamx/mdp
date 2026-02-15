@@ -19,6 +19,10 @@ pub enum Event {
     StrongStart,
     /// End of strong emphasis (bold)
     StrongEnd,
+    /// Start of emphasis (italics)
+    EmphasisStart,
+    /// End of emphasis (italics)
+    EmphasisEnd,
 }
 
 /// Block elements in markdown
@@ -48,12 +52,14 @@ fn convert_event(event: MdEvent) -> Event {
         MdEvent::Start(tag) => {
             match tag {
                 Tag::Strong => Event::StrongStart,
+                Tag::Emphasis => Event::EmphasisStart,
                 _ => Event::Start(convert_tag(tag)),
             }
         }
         MdEvent::End(tag) => {
             match tag {
                 TagEnd::Strong => Event::StrongEnd,
+                TagEnd::Emphasis => Event::EmphasisEnd,
                 _ => Event::End(convert_tag_end(tag)),
             }
         }

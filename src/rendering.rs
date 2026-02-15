@@ -53,6 +53,8 @@ impl Renderer {
             Event::End(block) => self.render_block_end(block),
             Event::StrongStart => self.render_bold_start(),
             Event::StrongEnd => self.render_bold_end(),
+            Event::EmphasisStart => self.render_italics_start(),
+            Event::EmphasisEnd => self.render_italics_end(),
         }
     }
 
@@ -98,6 +100,16 @@ impl Renderer {
 
     /// Render bold text end (ANSI bold off)
     fn render_bold_end(&mut self) {
+        self.current_line.push_str("\x1b[0m");
+    }
+
+    /// Render italics text start (ANSI italics on)
+    fn render_italics_start(&mut self) {
+        self.current_line.push_str("\x1b[3m");
+    }
+
+    /// Render italics text end (ANSI italics off)
+    fn render_italics_end(&mut self) {
         self.current_line.push_str("\x1b[0m");
     }
 

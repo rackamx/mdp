@@ -116,6 +116,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_italics_underscores()` - render `_italic_`, verify ANSI codes
   - `test_render_italics_mixed()` - render "normal *italic* normal"
 
+**Status**: DONE
+
 ---
 
 ### T07 - Heading Rendering
