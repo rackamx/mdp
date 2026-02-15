@@ -619,7 +619,7 @@ After implementing tasks:
 - [x] Add regression tests for escaped image-like links and source-range extraction.
 - [x] Add rendering tests for HTML block boundaries, definition lists, and table alignment output.
 - [x] Add tests for nested emphasis/strong/strikethrough interactions and wrapping around ANSI-decorated text.
-- [ ] Add an AddressSanitizer (ASAN) regression mode for Rust (`make asan-regression`).
-- [ ] ASAN acceptance criteria: command is documented in `README.md` and exits non-zero on sanitizer findings.
-- [ ] ASAN acceptance criteria: mode runs regression tests (`cargo test --tests`), and any exclusions are documented.
-- [ ] Coverage acceptance criteria: keep coverage at or above 90% for regions/functions/lines (`make coverage-gate`).
+- [x] Add an AddressSanitizer (ASAN) regression mode for Rust (`make asan-regression`).
+- [x] ASAN acceptance criteria: command is documented in `README.md` and exits non-zero on sanitizer findings.
+- [x] ASAN acceptance criteria: mode runs regression tests (`cargo test --tests`), and any exclusions are documented.
+- [x] Coverage acceptance criteria: keep coverage at or above 90% for regions/functions/lines (`make coverage-gate`).
