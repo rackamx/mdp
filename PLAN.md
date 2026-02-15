@@ -160,6 +160,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_block_quote()` - render `> quote`, verify `|` prefix
   - `test_render_block_quote_multiline()` - render multi-line block quote
 
+**Status**: DONE
+
 ---
 
 ### T10 - List Rendering

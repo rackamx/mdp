@@ -18,6 +18,10 @@ pub struct Renderer {
     in_code_block: bool,
     /// Code block info string (e.g., language)
     code_block_info: Option<String>,
+    /// Whether we're currently in a block quote
+    in_block_quote: bool,
+    /// Prefix character for block quote
+    block_quote_prefix: char,
 }
 
 impl Renderer {
@@ -32,6 +36,8 @@ impl Renderer {
             heading_text: String::new(),
             in_code_block: false,
             code_block_info: None,
+            in_block_quote: false,
+            block_quote_prefix: '|',
         }
     }
 
@@ -45,6 +51,7 @@ impl Renderer {
         self.heading_text.clear();
         self.in_code_block = false;
         self.code_block_info = None;
+        self.in_block_quote = false;
 
         for event in events {
             self.process_event(event);
@@ -102,7 +109,18 @@ impl Renderer {
 
     /// Render a space (soft break between words)
     fn render_space(&mut self) {
-        if self.cursor_col > 0 && self.cursor_col < self.width {
+        // Within a block quote, soft breaks become new lines with prefix
+        if self.in_block_quote {
+            // Flush current line
+            if !self.current_line.is_empty() {
+                self.lines.push(self.current_line.clone());
+                self.current_line.clear();
+            }
+            // Add block quote prefix for new line
+            self.current_line.push(self.block_quote_prefix);
+            self.current_line.push(' ');
+            self.cursor_col = 2;
+        } else if self.cursor_col > 0 && self.cursor_col < self.width {
             self.current_line.push(' ');
             self.cursor_col += 1;
         }
@@ -152,6 +170,13 @@ impl Renderer {
             self.lines.push(String::new());
         }
         self.cursor_col = 0;
+
+        // If we're in a block quote, add prefix to new line
+        if self.in_block_quote {
+            self.current_line.push(self.block_quote_prefix);
+            self.current_line.push(' ');
+            self.cursor_col = 2;
+        }
     }
 
     /// Render a horizontal rule
@@ -194,7 +219,12 @@ impl Renderer {
                 // Start of paragraph - no special handling needed
             }
             crate::parsing::Block::BlockQuote => {
-                // Block quote handling
+                // Track block quote state
+                self.in_block_quote = true;
+                // Add block quote prefix
+                self.current_line.push(self.block_quote_prefix);
+                self.current_line.push(' ');
+                self.cursor_col = 2;
             }
             crate::parsing::Block::CodeBlock { info } => {
                 // Track code block state
@@ -267,6 +297,16 @@ impl Renderer {
                 // Reset code block state
                 self.in_code_block = false;
                 self.code_block_info = None;
+            }
+            crate::parsing::Block::BlockQuote => {
+                // Reset block quote state
+                self.in_block_quote = false;
+                // Flush current line if not empty
+                if !self.current_line.is_empty() {
+                    self.lines.push(self.current_line.clone());
+                    self.current_line.clear();
+                    self.cursor_col = 0;
+                }
             }
             _ => {
                 // For other blocks, just flush current line

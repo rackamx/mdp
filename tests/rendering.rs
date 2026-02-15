@@ -324,3 +324,42 @@ fn test_render_inline_code() {
     assert!(output.contains("\x1b[2m"),
             "Expected faint code \\x1b[2m in output, got: {:?}", output);
 }
+
+/// Test block quote rendering with > prefix
+#[test]
+fn test_render_block_quote() {
+    let markdown = "> quote";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the quote text
+    assert!(output.contains("quote"),
+            "Expected 'quote' in output, got: {:?}", output);
+    // Should have | prefix for block quote
+    assert!(output.contains("|"),
+            "Expected '|' prefix for block quote in output, got: {:?}", output);
+}
+
+/// Test multi-line block quote rendering
+#[test]
+fn test_render_block_quote_multiline() {
+    let markdown = "> line one\n> line two\n> line three";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain all quote lines
+    assert!(output.contains("line one"),
+            "Expected 'line one' in output, got: {:?}", output);
+    assert!(output.contains("line two"),
+            "Expected 'line two' in output, got: {:?}", output);
+    assert!(output.contains("line three"),
+            "Expected 'line three' in output, got: {:?}", output);
+    // Should have | prefix for each line
+    let pipe_count = output.matches('|').count();
+    assert!(pipe_count >= 3,
+            "Expected at least 3 '|' prefixes in output, got: {}", pipe_count);
+}
