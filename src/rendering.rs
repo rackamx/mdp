@@ -58,6 +58,10 @@ pub struct Renderer {
     in_definition_list: bool,
     /// Whether we're rendering a definition entry
     in_definition_entry: bool,
+    /// Whether we're currently inside a footnote definition block
+    in_footnote_definition: bool,
+    /// Whether the footnote section separator has already been rendered
+    footnote_section_started: bool,
 }
 
 impl Renderer {
@@ -195,11 +199,12 @@ impl Renderer {
             in_table_cell: false,
             in_definition_list: false,
             in_definition_entry: false,
+            in_footnote_definition: false,
+            footnote_section_started: false,
         }
     }
 
-    /// Render markdown events to a string
-    pub fn render(&mut self, events: &[Event]) -> String {
+    fn reset_state(&mut self) {
         // Reset state
         self.lines.clear();
         self.current_line.clear();
@@ -226,7 +231,13 @@ impl Renderer {
         self.in_table_cell = false;
         self.in_definition_list = false;
         self.in_definition_entry = false;
+        self.in_footnote_definition = false;
+        self.footnote_section_started = false;
+    }
 
+    /// Render markdown events to lines.
+    pub fn render_lines(&mut self, events: &[Event]) -> Vec<String> {
+        self.reset_state();
         // Combine consecutive Text events to properly handle escape sequences
         // like \*text\* which pulldown_cmark splits into multiple Text events
         let combined_events = Self::combine_text_events(events);
@@ -240,7 +251,12 @@ impl Renderer {
             self.lines.push(self.current_line.clone());
         }
 
-        self.lines.join("\n")
+        self.lines.clone()
+    }
+
+    /// Render markdown events to a string
+    pub fn render(&mut self, events: &[Event]) -> String {
+        self.render_lines(events).join("\n")
     }
 
     /// Enable or disable Unicode fallback for strikethrough.
@@ -585,6 +601,9 @@ impl Renderer {
     fn render_newline(&mut self) {
         // Flush current line
         if !self.current_line.is_empty() {
+            if self.in_footnote_definition {
+                self.current_line.push_str("\x1b[0m");
+            }
             self.lines.push(self.current_line.clone());
             self.current_line.clear();
         } else {
@@ -600,6 +619,9 @@ impl Renderer {
             let indent = " ".repeat(self.list_item_continuation_indent);
             self.current_line.push_str(&indent);
             self.cursor_col = self.list_item_continuation_indent;
+        }
+        if self.in_footnote_definition {
+            self.current_line.push_str("\x1b[2m");
         }
     }
 
@@ -649,6 +671,12 @@ impl Renderer {
             return;
         }
 
+        if matches!(block, crate::parsing::Block::Paragraph) && self.in_footnote_definition {
+            // Paragraphs inside footnote definitions should continue on the
+            // same line as the footnote label prefix.
+            return;
+        }
+
         if matches!(block, crate::parsing::Block::Paragraph)
             && self.in_list
             && !self.current_line.is_empty()
@@ -682,7 +710,6 @@ impl Renderer {
                     | crate::parsing::Block::CodeBlock { .. }
                     | crate::parsing::Block::List { .. }
                     | crate::parsing::Block::Table { .. }
-                    | crate::parsing::Block::FootnoteDefinition { .. }
                     | crate::parsing::Block::DefinitionList
             );
 
@@ -717,6 +744,16 @@ impl Renderer {
                 self.in_table_cell = true;
             }
             crate::parsing::Block::FootnoteDefinition { label } => {
+                if !self.footnote_section_started {
+                    if !self.lines.is_empty() && !self.lines.last().is_some_and(String::is_empty) {
+                        self.lines.push(String::new());
+                    }
+                    let heading = Self::footnote_separator_line(self.width);
+                    self.lines.push(format!("\x1b[2m{heading}\x1b[0m"));
+                    self.footnote_section_started = true;
+                }
+                self.in_footnote_definition = true;
+                self.current_line.push_str("\x1b[2m");
                 let prefix = format!("[^{}] ", label);
                 self.current_line.push_str(&prefix);
                 self.cursor_col += Self::display_width(&prefix);
@@ -997,7 +1034,12 @@ impl Renderer {
                 self.in_definition_entry = false;
             }
             crate::parsing::Block::DefinitionListTitle => {}
-            crate::parsing::Block::FootnoteDefinition { .. } => {}
+            crate::parsing::Block::FootnoteDefinition { .. } => {
+                if self.in_footnote_definition {
+                    self.current_line.push_str("\x1b[0m");
+                    self.in_footnote_definition = false;
+                }
+            }
             _ => {
                 // For other blocks, just flush current line
                 if !self.current_line.is_empty() {
@@ -1119,6 +1161,16 @@ impl Renderer {
         }
         out.push('┤');
         out
+    }
+
+    fn footnote_separator_line(width: usize) -> String {
+        let title = " Footnotes ";
+        let min_width = title.chars().count() + 4;
+        let line_width = width.max(min_width);
+        let side = (line_width - title.chars().count()) / 2;
+        let left = "─".repeat(side);
+        let right = "─".repeat(line_width - title.chars().count() - side);
+        format!("{left}{title}{right}")
     }
 
     fn smart_punctuation(text: &str) -> String {

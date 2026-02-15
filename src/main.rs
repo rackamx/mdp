@@ -64,9 +64,27 @@ fn run() -> i32 {
                 .help("Render strikethrough using ANSI escape codes instead of Unicode overlay")
                 .action(clap::ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("benchmark")
+                .long("benchmark")
+                .help("Run a local performance benchmark (parse/render/search) and exit")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("bench-iters")
+                .long("bench-iters")
+                .value_name("N")
+                .value_parser(clap::value_parser!(usize))
+                .default_value("50")
+                .help("Number of benchmark iterations"),
+        )
         .get_matches();
     let width_override = matches.get_one::<usize>("width").copied();
     let strikethrough_fallback = !matches.get_flag("ansi-strikethrough");
+    let benchmark_mode = matches.get_flag("benchmark");
+    let bench_iters = *matches
+        .get_one::<usize>("bench-iters")
+        .expect("bench-iters has a default value");
 
     let (markdown, source_label, reload_path) = match matches.get_one::<String>("file") {
         Some(file_path) if file_path == "-" => match read_stdin() {
@@ -102,6 +120,13 @@ fn run() -> i32 {
         }
     };
 
+    if benchmark_mode {
+        let width = width_override.unwrap_or_else(detect_default_width);
+        let report = run_benchmark(&markdown, width, strikethrough_fallback, bench_iters);
+        println!("{report}");
+        return 0;
+    }
+
     if !io::stdout().is_terminal() || !io::stdin().is_terminal() {
         let rendered = render_markdown(
             &markdown,
@@ -135,6 +160,83 @@ fn render_markdown(markdown: &str, width: usize, strikethrough_fallback: bool) -
     renderer.render(&events)
 }
 
+fn render_markdown_lines(
+    markdown: &str,
+    width: usize,
+    strikethrough_fallback: bool,
+) -> Vec<String> {
+    let events: Vec<_> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(width);
+    renderer.set_strikethrough_fallback(strikethrough_fallback);
+    renderer.render_lines(&events)
+}
+
+fn run_benchmark(
+    markdown: &str,
+    width: usize,
+    strikethrough_fallback: bool,
+    iters: usize,
+) -> String {
+    let iterations = iters.max(1);
+    let mut parse_render_total = Duration::ZERO;
+    let mut search_total = Duration::ZERO;
+    let mut rendered_lines = 0usize;
+    let mut search_hits = 0usize;
+    let mut search_attempts = 0usize;
+
+    let queries = ["the", "list", "code", "heading", "footnote"];
+
+    for _ in 0..iterations {
+        let t0 = std::time::Instant::now();
+        let events: Vec<_> = parse_markdown(markdown).collect();
+        let mut renderer = Renderer::new(width);
+        renderer.set_strikethrough_fallback(strikethrough_fallback);
+        let lines = renderer.render_lines(&events);
+        parse_render_total += t0.elapsed();
+        rendered_lines = lines.len();
+
+        let mut pager = Pager::new(
+            PagerConfig {
+                page_size: 24,
+                cols: width,
+            },
+            if lines.is_empty() {
+                vec![String::new()]
+            } else {
+                lines
+            },
+        );
+
+        let t1 = std::time::Instant::now();
+        for query in queries {
+            search_attempts += 1;
+            if pager.search(query).is_some() {
+                search_hits += 1;
+            }
+        }
+        search_total += t1.elapsed();
+    }
+
+    let parse_render_avg_ms = parse_render_total.as_secs_f64() * 1000.0 / iterations as f64;
+    let search_avg_ms = search_total.as_secs_f64() * 1000.0 / iterations as f64;
+    let total_avg_ms = parse_render_avg_ms + search_avg_ms;
+
+    format!(
+        "Benchmark (mdp)\nIterations: {iterations}\nInput bytes: {}\nRender width: {width}\nRendered lines: {rendered_lines}\nParse+Render avg: {:.3} ms\nSearch avg ({} queries): {:.3} ms\nTotal avg/iter: {:.3} ms\nSearch hits: {search_hits}/{search_attempts}",
+        markdown.len(),
+        parse_render_avg_ms,
+        queries.len(),
+        search_avg_ms,
+        total_avg_ms
+    )
+}
+
+#[derive(Default)]
+struct FrameCache {
+    body_lines: Vec<String>,
+    footer: String,
+}
+
 fn run_interactive_pager(
     mut markdown: String,
     width_override: Option<usize>,
@@ -154,7 +256,13 @@ fn run_interactive_pager(
         strikethrough_fallback,
     );
     let mut status_message: Option<String> = None;
-    draw_page(&pager, source_label, status_message.as_deref())?;
+    let mut frame_cache = FrameCache::default();
+    draw_page(
+        &pager,
+        source_label,
+        status_message.as_deref(),
+        &mut frame_cache,
+    )?;
 
     loop {
         if SIGINT_RECEIVED.load(Ordering::SeqCst) {
@@ -176,7 +284,13 @@ fn run_interactive_pager(
                     width_override,
                     strikethrough_fallback,
                 );
-                draw_page(&pager, source_label, status_message.as_deref())?;
+                frame_cache = FrameCache::default();
+                draw_page(
+                    &pager,
+                    source_label,
+                    status_message.as_deref(),
+                    &mut frame_cache,
+                )?;
                 continue;
             }
             CEvent::Key(key_event) => key_event,
@@ -202,6 +316,18 @@ fn run_interactive_pager(
             KeyCode::Char('b') | KeyCode::PageUp => pager.page_up(),
             KeyCode::Char('g') | KeyCode::Home => pager.go_to_beginning(),
             KeyCode::Char('G') | KeyCode::End => pager.go_to_end(),
+            KeyCode::Char('/') => match prompt_search(&pager, source_label)? {
+                Some(pattern) if pattern.is_empty() => {
+                    pager.clear_search();
+                    status_message = Some("Search cleared".to_string());
+                }
+                Some(pattern) => {
+                    let _ = pager.search(&pattern);
+                }
+                None => {
+                    status_message = Some("Search canceled".to_string());
+                }
+            },
             KeyCode::Char('n') => pager.search_next(),
             KeyCode::Char('N') => pager.search_previous(),
             KeyCode::Char('h') | KeyCode::Char('?') => draw_help(&pager.help_text())?,
@@ -229,7 +355,12 @@ fn run_interactive_pager(
             },
             _ => {}
         }
-        draw_page(&pager, source_label, status_message.as_deref())?;
+        draw_page(
+            &pager,
+            source_label,
+            status_message.as_deref(),
+            &mut frame_cache,
+        )?;
     }
 
     let mut stdout = io::stdout();
@@ -249,12 +380,11 @@ fn build_pager(
 ) -> Pager {
     let page_size = rows.saturating_sub(1).max(1);
     let render_width = width_override.unwrap_or_else(|| default_width_for_cols(cols));
-    let rendered = render_markdown(markdown, render_width, strikethrough_fallback);
-
-    let lines: Vec<String> = if rendered.is_empty() {
+    let rendered_lines = render_markdown_lines(markdown, render_width, strikethrough_fallback);
+    let lines: Vec<String> = if rendered_lines.is_empty() {
         vec![String::new()]
     } else {
-        rendered.lines().map(|line| line.to_string()).collect()
+        rendered_lines
     };
 
     let mut pager = Pager::new(PagerConfig { page_size, cols }, lines);
@@ -300,9 +430,10 @@ fn source_label_for_arg(file_arg: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_width_for_cols, interrupted_exit_code, looks_binary, reload_markdown,
-        source_label_for_arg, SIGINT_RECEIVED,
+        build_footer_line, default_width_for_cols, interrupted_exit_code, looks_binary,
+        reload_markdown, source_label_for_arg, SIGINT_RECEIVED,
     };
+    use mdp::pager::{Pager, PagerConfig};
     use std::fs;
     use std::sync::atomic::Ordering;
 
@@ -360,6 +491,42 @@ mod tests {
         assert!(reloaded.is_none());
     }
 
+    #[test]
+    fn test_footer_includes_search_status() {
+        let mut pager = Pager::new(
+            PagerConfig {
+                page_size: 10,
+                cols: 80,
+            },
+            vec!["alpha beta".to_string()],
+        );
+        let _ = pager.search("beta");
+
+        let footer = build_footer_line(&pager, "sample.md", None);
+        assert!(
+            footer.contains("Search: 'beta' (1/1)"),
+            "Expected search status in footer, got: {footer:?}"
+        );
+    }
+
+    #[test]
+    fn test_footer_includes_search_and_status_message() {
+        let mut pager = Pager::new(
+            PagerConfig {
+                page_size: 10,
+                cols: 80,
+            },
+            vec!["alpha beta".to_string()],
+        );
+        let _ = pager.search("beta");
+
+        let footer = build_footer_line(&pager, "sample.md", Some("Reloaded"));
+        assert!(
+            footer.contains("Search: 'beta' (1/1) | Reloaded"),
+            "Expected search and status message in footer, got: {footer:?}"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn test_sigint_handler_sets_flag() {
@@ -373,25 +540,104 @@ fn draw_page(
     pager: &Pager,
     source_label: &str,
     status_message: Option<&str>,
+    cache: &mut FrameCache,
 ) -> Result<(), io::Error> {
     let mut stdout = io::stdout();
-    stdout.execute(MoveTo(0, 0))?;
-    stdout.execute(Clear(ClearType::All))?;
-
-    for line in pager.visible_lines_with_highlight() {
-        write!(stdout, "{line}\r\n")?;
+    let page_size = pager.page_size();
+    let (start, end) = pager.visible_range();
+    let mut body_lines = Vec::with_capacity(page_size);
+    for line_num in start..end {
+        body_lines.push(pager.display_line(line_num).into_owned());
+    }
+    while body_lines.len() < page_size {
+        body_lines.push(String::new());
     }
 
-    if let Some(indicator) = pager.progress_indicator() {
-        write!(stdout, "[{source_label}] {indicator}")?;
-    } else {
-        write!(stdout, "[{source_label}]")?;
+    for row in 0..page_size {
+        if cache.body_lines.get(row) != body_lines.get(row) {
+            stdout.execute(MoveTo(0, row as u16))?;
+            stdout.execute(Clear(ClearType::CurrentLine))?;
+            if let Some(line) = body_lines.get(row) {
+                write!(stdout, "{line}")?;
+            }
+        }
     }
-    if let Some(message) = status_message {
-        write!(stdout, " | {message}")?;
+
+    let footer = build_footer_line(pager, source_label, status_message);
+    if cache.footer != footer {
+        stdout.execute(MoveTo(0, page_size as u16))?;
+        stdout.execute(Clear(ClearType::CurrentLine))?;
+        write!(stdout, "{footer}")?;
     }
+
+    cache.body_lines = body_lines;
+    cache.footer = footer;
     stdout.flush()?;
     Ok(())
+}
+
+fn build_footer_line(pager: &Pager, source_label: &str, status_message: Option<&str>) -> String {
+    let mut footer = if let Some(indicator) = pager.progress_indicator() {
+        format!("[{source_label}] {indicator}")
+    } else {
+        format!("[{source_label}]")
+    };
+
+    let search_status = pager.search_status_message();
+    if !search_status.is_empty() {
+        footer.push_str(" | ");
+        footer.push_str(&search_status);
+    }
+
+    if let Some(message) = status_message {
+        if !message.is_empty() {
+            footer.push_str(" | ");
+            footer.push_str(message);
+        }
+    }
+
+    footer
+}
+
+fn prompt_search(pager: &Pager, source_label: &str) -> Result<Option<String>, io::Error> {
+    let mut pattern = String::new();
+    let mut cache = FrameCache::default();
+
+    loop {
+        let prompt = format!("/{}", pattern);
+        draw_page(pager, source_label, Some(&prompt), &mut cache)?;
+
+        let ev = event::read()?;
+        let key = match ev {
+            CEvent::Resize(_, _) => continue,
+            CEvent::Key(k) => k,
+            _ => continue,
+        };
+
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            continue;
+        }
+
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "SIGINT"));
+        }
+
+        match key.code {
+            KeyCode::Enter => return Ok(Some(pattern)),
+            KeyCode::Esc => return Ok(None),
+            KeyCode::Backspace => {
+                pattern.pop();
+            }
+            KeyCode::Char(ch) => {
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT)
+                {
+                    pattern.push(ch);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn draw_help(help_lines: &[String]) -> Result<(), io::Error> {

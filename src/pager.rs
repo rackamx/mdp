@@ -1,5 +1,7 @@
 /// Pager module - handles scrolling through rendered content
+use std::borrow::Cow;
 use std::cmp;
+use std::collections::HashMap;
 
 /// Configuration for the pager
 #[derive(Debug, Clone)]
@@ -29,10 +31,21 @@ pub struct Pager {
     config: PagerConfig,
     /// Current search pattern
     search_pattern: Option<String>,
-    /// List of (line_index, column_index) for search matches
-    search_matches: Vec<(usize, usize)>,
+    /// List of (line_index, start_byte, end_byte) for search matches
+    search_matches: Vec<(usize, usize, usize)>,
+    /// Search matches indexed by line for efficient highlighting
+    search_matches_by_line: HashMap<usize, Vec<(usize, usize, usize)>>,
     /// Index of current match in search_matches
     current_match_index: Option<usize>,
+    /// Preprocessed searchable units for each line.
+    search_index: Vec<Vec<SearchUnit>>,
+}
+
+#[derive(Clone, Copy)]
+struct SearchUnit {
+    ch: char,
+    start: usize,
+    end: usize,
 }
 
 impl Pager {
@@ -42,13 +55,19 @@ impl Pager {
 
     /// Create a new Pager with the given config and content lines
     pub fn new(config: PagerConfig, lines: Vec<String>) -> Self {
+        let search_index = lines
+            .iter()
+            .map(|line| Self::build_search_units(line))
+            .collect();
         Pager {
             lines,
             scroll_position: 0,
             config,
             search_pattern: None,
             search_matches: Vec::new(),
+            search_matches_by_line: HashMap::new(),
             current_match_index: None,
+            search_index,
         }
     }
 
@@ -64,6 +83,19 @@ impl Pager {
         }
 
         self.lines[self.scroll_position..end].to_vec()
+    }
+
+    /// Returns the currently visible line range as [start, end).
+    pub fn visible_range(&self) -> (usize, usize) {
+        if self.scroll_position >= self.lines.len() {
+            return (self.lines.len(), self.lines.len());
+        }
+        let end = (self.scroll_position + self.config.page_size).min(self.lines.len());
+        (self.scroll_position, end)
+    }
+
+    pub fn page_size(&self) -> usize {
+        self.config.page_size
     }
 
     /// Scroll down by one page
@@ -143,26 +175,28 @@ impl Pager {
         self.scroll_position
     }
 
-    /// Search for a pattern in the content
-    /// Returns Some((line_index, column_index)) of first match, or None if not found
+    /// Search for a pattern in the content.
+    /// Behavior matches pager expectations: search forward from the current
+    /// scroll position, wrapping around the document if needed.
+    /// Returns Some((line_index, column_index)) of selected match, or None if not found.
     pub fn search(&mut self, pattern: &str) -> Option<(usize, usize)> {
         if pattern.is_empty() {
             self.search_pattern = None;
             self.search_matches.clear();
+            self.search_matches_by_line.clear();
             self.current_match_index = None;
             return None;
         }
 
         self.search_pattern = Some(pattern.to_string());
         self.search_matches.clear();
+        self.search_matches_by_line.clear();
+        let pat_chars: Vec<char> = pattern.chars().collect();
 
         // Find all matches
-        for (line_idx, line) in self.lines.iter().enumerate() {
-            let mut search_start = 0;
-            while let Some(pos) = line[search_start..].find(pattern) {
-                let absolute_pos = search_start + pos;
-                self.search_matches.push((line_idx, absolute_pos));
-                search_start = absolute_pos + 1;
+        for (line_idx, units) in self.search_index.iter().enumerate() {
+            for (start, end) in Self::find_matches_in_units(units, &pat_chars) {
+                self.search_matches.push((line_idx, start, end));
             }
         }
 
@@ -171,9 +205,18 @@ impl Pager {
             return None;
         }
 
-        // Set current match to first match
-        self.current_match_index = Some(0);
-        let (line_idx, col_idx) = self.search_matches[0];
+        // Select the first match after the current viewport start, wrapping to
+        // the first match in the document if needed.
+        let start_line = self.scroll_position.saturating_add(1);
+        let selected_idx = self
+            .search_matches
+            .iter()
+            .position(|(line_idx, _, _)| *line_idx >= start_line)
+            .unwrap_or(0);
+
+        self.current_match_index = Some(selected_idx);
+        let (line_idx, col_idx, _end_idx) = self.search_matches[selected_idx];
+        self.rebuild_match_line_index();
 
         // Scroll to the match
         self.scroll_to_show_line(line_idx);
@@ -191,7 +234,7 @@ impl Pager {
         let next_idx = (current_idx + 1) % self.search_matches.len();
         self.current_match_index = Some(next_idx);
 
-        let (line_idx, _) = self.search_matches[next_idx];
+        let (line_idx, _, _) = self.search_matches[next_idx];
         self.scroll_to_show_line(line_idx);
     }
 
@@ -209,7 +252,7 @@ impl Pager {
         };
         self.current_match_index = Some(prev_idx);
 
-        let (line_idx, _) = self.search_matches[prev_idx];
+        let (line_idx, _, _) = self.search_matches[prev_idx];
         self.scroll_to_show_line(line_idx);
     }
 
@@ -232,51 +275,45 @@ impl Pager {
 
     /// Get visible lines with search matches highlighted
     pub fn visible_lines_with_highlight(&self) -> Vec<String> {
-        let pattern = match &self.search_pattern {
-            Some(p) => p,
-            None => return self.visible_lines(),
-        };
-
-        let visible = self.visible_lines();
-        let start_line = self.scroll_position;
-
-        visible
-            .iter()
-            .enumerate()
-            .map(|(idx, line)| {
-                let line_num = start_line + idx;
-                self.highlight_pattern(line, pattern, line_num)
-            })
+        let (start, end) = self.visible_range();
+        (start..end)
+            .map(|line_num| self.display_line(line_num).into_owned())
             .collect()
     }
 
-    /// Highlight all occurrences of a pattern in a line
-    fn highlight_pattern(&self, line: &str, pattern: &str, line_num: usize) -> String {
-        if !self.search_matches.iter().any(|(l, _)| *l == line_num) {
-            return line.to_string();
+    pub fn display_line<'a>(&'a self, line_num: usize) -> Cow<'a, str> {
+        let Some(line) = self.lines.get(line_num) else {
+            return Cow::Borrowed("");
+        };
+        if self.search_pattern.is_none() || !self.search_matches_by_line.contains_key(&line_num) {
+            return Cow::Borrowed(line);
         }
+        Cow::Owned(self.highlight_pattern(line, line_num))
+    }
+
+    /// Highlight all occurrences of a pattern in a line
+    fn highlight_pattern(&self, line: &str, line_num: usize) -> String {
+        let Some(line_matches) = self.search_matches_by_line.get(&line_num) else {
+            return line.to_string();
+        };
 
         let mut result = String::new();
         let mut last_end = 0;
 
-        // Get all matches on this line
-        let line_matches: Vec<usize> = self
-            .search_matches
-            .iter()
-            .filter(|(l, _)| *l == line_num)
-            .map(|(_, col)| *col)
-            .collect();
-
-        for col in line_matches {
+        for (match_idx, start, end) in line_matches {
             // Add text before the match
-            if col > last_end {
-                result.push_str(&line[last_end..col]);
+            if *start > last_end {
+                result.push_str(&line[last_end..*start]);
             }
-            // Add the highlighted match
-            result.push_str("\x1b[1m"); // Bold start
-            result.push_str(&line[col..col + pattern.len()]);
+            // Highlight all matches in bold, and current match in reverse for visibility.
+            if self.current_match_index == Some(*match_idx) {
+                result.push_str("\x1b[7m\x1b[1m");
+            } else {
+                result.push_str("\x1b[1m");
+            }
+            result.push_str(&line[*start..*end]);
             result.push_str("\x1b[0m"); // Bold end
-            last_end = col + pattern.len();
+            last_end = *end;
         }
 
         // Add remaining text after last match
@@ -285,6 +322,88 @@ impl Pager {
         }
 
         result
+    }
+
+    fn find_matches_in_units(units: &[SearchUnit], pat_chars: &[char]) -> Vec<(usize, usize)> {
+        if pat_chars.is_empty() {
+            return Vec::new();
+        }
+        if units.len() < pat_chars.len() {
+            return Vec::new();
+        }
+
+        let mut out = Vec::new();
+        let mut start = 0usize;
+        while start + pat_chars.len() <= units.len() {
+            let mut matched = true;
+            for (offset, pat_ch) in pat_chars.iter().enumerate() {
+                if units[start + offset].ch != *pat_ch {
+                    matched = false;
+                    break;
+                }
+            }
+
+            if matched {
+                let start_byte = units[start].start;
+                let end_byte = units[start + pat_chars.len() - 1].end;
+                out.push((start_byte, end_byte));
+            }
+            start += 1;
+        }
+
+        out
+    }
+
+    fn build_search_units(line: &str) -> Vec<SearchUnit> {
+        let mut units = Vec::new();
+        let bytes = line.as_bytes();
+        let mut i = 0usize;
+
+        while i < bytes.len() {
+            let ch = line[i..]
+                .chars()
+                .next()
+                .expect("char boundary iteration should be valid");
+            let ch_len = ch.len_utf8();
+
+            // Skip ANSI CSI escapes like \x1b[...m
+            if ch == '\x1b' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+                i += 2;
+                while i < bytes.len() {
+                    let b = bytes[i];
+                    i += 1;
+                    if (0x40..=0x7E).contains(&b) {
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            // Skip Unicode combining strikethrough overlay.
+            if ch == '\u{0336}' {
+                i += ch_len;
+                continue;
+            }
+
+            units.push(SearchUnit {
+                ch,
+                start: i,
+                end: i + ch_len,
+            });
+            i += ch_len;
+        }
+
+        units
+    }
+
+    fn rebuild_match_line_index(&mut self) {
+        self.search_matches_by_line.clear();
+        for (match_idx, (line, start, end)) in self.search_matches.iter().enumerate() {
+            self.search_matches_by_line
+                .entry(*line)
+                .or_default()
+                .push((match_idx, *start, *end));
+        }
     }
 
     /// Get the search status message
@@ -312,6 +431,7 @@ impl Pager {
     pub fn clear_search(&mut self) {
         self.search_pattern = None;
         self.search_matches.clear();
+        self.search_matches_by_line.clear();
         self.current_match_index = None;
     }
 
@@ -399,5 +519,101 @@ mod tests {
             "Expected reload keybinding in help text, got: {:?}",
             help
         );
+    }
+
+    #[test]
+    fn test_search_status_progresses_with_next_previous() {
+        let lines = vec![
+            "alpha beta".to_string(),
+            "beta gamma".to_string(),
+            "delta beta".to_string(),
+        ];
+        let mut pager = Pager::new(PagerConfig::default(), lines);
+
+        let first = pager.search("beta");
+        assert!(first.is_some(), "Expected to find at least one match");
+        assert_eq!(pager.search_status_message(), "Search: 'beta' (2/3)");
+
+        pager.search_next();
+        assert_eq!(pager.search_status_message(), "Search: 'beta' (3/3)");
+
+        pager.search_previous();
+        assert_eq!(pager.search_status_message(), "Search: 'beta' (2/3)");
+    }
+
+    #[test]
+    fn test_current_search_match_is_visually_distinct() {
+        let lines = vec!["foo foo".to_string()];
+        let mut pager = Pager::new(PagerConfig::default(), lines);
+        let _ = pager.search("foo");
+
+        let rendered = pager.visible_lines_with_highlight();
+        let line = &rendered[0];
+        let reverse_count = line.matches("\x1b[7m").count();
+        assert_eq!(
+            reverse_count, 1,
+            "Expected exactly one active match highlight, got: {:?}",
+            line
+        );
+
+        pager.search_next();
+        let rendered_next = pager.visible_lines_with_highlight();
+        let line_next = &rendered_next[0];
+        let reverse_count_next = line_next.matches("\x1b[7m").count();
+        assert_eq!(
+            reverse_count_next, 1,
+            "Expected exactly one active match highlight after next, got: {:?}",
+            line_next
+        );
+    }
+
+    #[test]
+    fn test_search_starts_from_current_position_and_wraps() {
+        let lines = vec![
+            "target at top".to_string(), // line 0
+            "line 1".to_string(),
+            "line 2".to_string(),
+            "line 3".to_string(),
+            "line 4".to_string(),
+            "target after viewport".to_string(), // line 5
+        ];
+        let mut pager = Pager::new(
+            PagerConfig {
+                page_size: 2,
+                cols: 80,
+            },
+            lines,
+        );
+        pager.go_to_line(2); // current viewport starts at line 2
+
+        let first = pager.search("target").expect("expected search match");
+        assert_eq!(
+            first.0, 5,
+            "Expected first forward match from current position, got: {:?}",
+            first
+        );
+
+        pager.search_next();
+        assert_eq!(
+            pager.search_status_message(),
+            "Search: 'target' (1/2)",
+            "Expected wrapped next match after reaching end"
+        );
+    }
+
+    #[test]
+    fn test_search_matches_unicode_combining_strikethrough_text() {
+        let struck = "s\u{0336}t\u{0336}r\u{0336}i\u{0336}k\u{0336}e\u{0336}";
+        let mut pager = Pager::new(
+            PagerConfig {
+                page_size: 5,
+                cols: 80,
+            },
+            vec![format!("this is {struck} text")],
+        );
+
+        let found = pager.search("strike");
+        assert!(found.is_some(), "Expected plain query to match struck text");
+        assert_eq!(pager.search_status_message(), "Search: 'strike' (1/1)");
     }
 }

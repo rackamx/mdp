@@ -1576,6 +1576,46 @@ fn test_render_footnote_definition() {
         "Expected rendered footnote definition, got: {:?}",
         output
     );
+    assert!(
+        output.contains("Footnotes"),
+        "Expected footnote section separator heading, got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("\x1b[2m"),
+        "Expected dim style for footnotes, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_footnote_definition_inline_after_label() {
+    let markdown = "[^1]: definition text";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("[^1] definition text"),
+        "Expected footnote text on same line as label, got: {:?}",
+        plain
+    );
+}
+
+#[test]
+fn test_render_footnote_separator_once_for_multiple_definitions() {
+    let markdown = "[^1]: one\n[^2]: two";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    assert_eq!(
+        output.matches("Footnotes").count(),
+        1,
+        "Expected one footnote section separator, got: {:?}",
+        output
+    );
 }
 
 /// Test definition list rendering
