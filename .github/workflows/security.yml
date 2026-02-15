@@ -36,5 +36,5 @@ jobs:
       - name: Run cargo-audit
         run: cargo audit
 
-      - name: Run cargo-deny advisories check
-        run: cargo deny check advisories
+      - name: Run cargo-deny policy checks
+        run: cargo deny check advisories licenses bans sources
