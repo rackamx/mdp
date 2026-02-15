@@ -1126,6 +1126,37 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_navigation_action_with_real_pager_executes_impl_methods() {
+        let mut pager = Pager::new(
+            PagerConfig {
+                page_size: 2,
+                cols: 80,
+            },
+            vec![
+                "alpha beta".to_string(),
+                "beta gamma".to_string(),
+                "gamma delta".to_string(),
+            ],
+        );
+        let _ = pager.search("beta");
+
+        assert!(apply_navigation_action(&mut pager, PagerKeyAction::ScrollDown));
+        assert!(apply_navigation_action(&mut pager, PagerKeyAction::ScrollUp));
+        assert!(apply_navigation_action(&mut pager, PagerKeyAction::PageDown));
+        assert!(apply_navigation_action(&mut pager, PagerKeyAction::PageUp));
+        assert!(apply_navigation_action(
+            &mut pager,
+            PagerKeyAction::GoToBeginning
+        ));
+        assert!(apply_navigation_action(&mut pager, PagerKeyAction::GoToEnd));
+        assert!(apply_navigation_action(&mut pager, PagerKeyAction::SearchNext));
+        assert!(apply_navigation_action(
+            &mut pager,
+            PagerKeyAction::SearchPrevious
+        ));
+    }
+
+    #[test]
     fn test_reload_markdown_missing_file_propagates_error() {
         let err = reload_markdown(Some("/definitely/missing/file.md"))
             .expect_err("missing file should produce error");
