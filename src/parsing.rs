@@ -1,4 +1,4 @@
-use pulldown_cmark::{Event as MdEvent, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
 
 /// Events produced by the markdown parser for rendering
 #[derive(Debug, Clone, PartialEq)]
@@ -13,8 +13,8 @@ pub enum Event {
     SoftBreak,
     /// Hard break (line break)
     HardBreak,
-    /// Horizontal rule
-    Rule,
+    /// Horizontal rule with detected source marker ('-', '*', or '_')
+    Rule(char),
     /// Start of strong emphasis (bold)
     StrongStart,
     /// End of strong emphasis (bold)
@@ -23,12 +23,24 @@ pub enum Event {
     EmphasisStart,
     /// End of emphasis (italics)
     EmphasisEnd,
+    /// Start of strikethrough
+    StrikethroughStart,
+    /// End of strikethrough
+    StrikethroughEnd,
     /// Inline code (backtick-enclosed)
     InlineCode(String),
+    /// Raw HTML (block or inline)
+    RawHtml(String),
     /// Link with text and URL
     Link { text: String, url: String },
     /// Image with alt text and URL (skip rendering, just show alt text)
     Image { alt: String, url: String },
+    /// Task list checkbox marker (`- [ ]` or `- [x]`)
+    TaskListMarker(bool),
+    /// Footnote reference (e.g. [^1])
+    FootnoteReference(String),
+    /// Unordered list item marker from source ('-', '*', '+')
+    ListItemMarker(char),
 }
 
 /// Block elements in markdown
@@ -46,14 +58,51 @@ pub enum Block {
     List { start: Option<u64> },
     /// List item
     ListItem,
+    /// Table container
+    Table { alignments: Vec<CellAlignment> },
+    /// Table header section
+    TableHead,
+    /// Table row
+    TableRow,
+    /// Table cell
+    TableCell,
+    /// Footnote definition block
+    FootnoteDefinition { label: String },
+    /// Definition list container
+    DefinitionList,
+    /// Definition list term/title
+    DefinitionListTitle,
+    /// Definition list definition/content
+    DefinitionListDefinition,
+}
+
+/// Table cell alignment
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellAlignment {
+    None,
+    Left,
+    Center,
+    Right,
 }
 
 /// Parse markdown text and return an iterator of events
 pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
-    let parser = Parser::new(markdown);
+    let parser = Parser::new_ext(
+        markdown,
+        Options::ENABLE_STRIKETHROUGH
+            | Options::ENABLE_TASKLISTS
+            | Options::ENABLE_TABLES
+            | Options::ENABLE_FOOTNOTES
+            | Options::ENABLE_DEFINITION_LIST,
+    );
     // Track link/image state: (is_link, is_image, url)
     let mut link_state: Option<(bool, bool, String)> = None;
     let mut link_text = String::new();
+    let rule_markers = detect_thematic_break_markers(markdown);
+    let mut rule_index = 0usize;
+    let unordered_item_markers = detect_unordered_item_markers(markdown);
+    let mut unordered_item_index = 0usize;
+    let mut list_kind_stack: Vec<bool> = Vec::new(); // true = ordered, false = unordered
 
     parser.flat_map(move |event| {
         let mut result = Vec::new();
@@ -76,6 +125,24 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                     }
                     Tag::Emphasis => {
                         result.push(Event::EmphasisStart);
+                    }
+                    Tag::Strikethrough => {
+                        result.push(Event::StrikethroughStart);
+                    }
+                    Tag::List(start) => {
+                        list_kind_stack.push(start.is_some());
+                        result.push(Event::Start(Block::List { start }));
+                    }
+                    Tag::Item => {
+                        if list_kind_stack.last().copied() == Some(false) {
+                            if let Some(marker) =
+                                unordered_item_markers.get(unordered_item_index).copied()
+                            {
+                                unordered_item_index += 1;
+                                result.push(Event::ListItemMarker(marker));
+                            }
+                        }
+                        result.push(Event::Start(Block::ListItem));
                     }
                     _ => {
                         result.push(Event::Start(convert_tag(tag)));
@@ -120,6 +187,13 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                     TagEnd::Emphasis => {
                         result.push(Event::EmphasisEnd);
                     }
+                    TagEnd::Strikethrough => {
+                        result.push(Event::StrikethroughEnd);
+                    }
+                    TagEnd::List(_) => {
+                        let _ = list_kind_stack.pop();
+                        result.push(Event::End(convert_tag_end(tag)));
+                    }
                     _ => {
                         result.push(Event::End(convert_tag_end(tag)));
                     }
@@ -135,19 +209,99 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
             }
             MdEvent::SoftBreak => result.push(Event::SoftBreak),
             MdEvent::HardBreak => result.push(Event::HardBreak),
-            MdEvent::Rule => result.push(Event::Rule),
+            MdEvent::Rule => {
+                let marker = rule_markers.get(rule_index).copied().unwrap_or('-');
+                rule_index += 1;
+                result.push(Event::Rule(marker));
+            }
             MdEvent::Code(code) => result.push(Event::InlineCode(code.to_string())),
             MdEvent::InlineMath(_) => result.push(Event::Text(String::new())),
             MdEvent::DisplayMath(_) => result.push(Event::Text(String::new())),
-            MdEvent::Html(_) => result.push(Event::Text(String::new())),
-            MdEvent::InlineHtml(_) => result.push(Event::Text(String::new())),
-            MdEvent::FootnoteReference(_) => result.push(Event::Text(String::new())),
-            MdEvent::TaskListMarker(_) => result.push(Event::Text(String::new())),
+            MdEvent::Html(html) => result.push(Event::RawHtml(html.to_string())),
+            MdEvent::InlineHtml(html) => result.push(Event::RawHtml(html.to_string())),
+            MdEvent::FootnoteReference(label) => {
+                result.push(Event::FootnoteReference(label.to_string()))
+            }
+            MdEvent::TaskListMarker(checked) => result.push(Event::TaskListMarker(checked)),
         }
 
         // Return iterator
         result.into_iter()
     })
+}
+
+fn detect_thematic_break_markers(markdown: &str) -> Vec<char> {
+    markdown
+        .lines()
+        .filter_map(thematic_break_marker_for_line)
+        .collect()
+}
+
+fn detect_unordered_item_markers(markdown: &str) -> Vec<char> {
+    markdown
+        .lines()
+        .filter_map(unordered_list_marker_for_line)
+        .collect()
+}
+
+fn unordered_list_marker_for_line(line: &str) -> Option<char> {
+    let mut s = line;
+
+    loop {
+        let trimmed = s.trim_start();
+        if let Some(rest) = trimmed.strip_prefix('>') {
+            s = rest.trim_start();
+            continue;
+        }
+        s = trimmed;
+        break;
+    }
+
+    let trimmed = s.trim_start();
+    let mut chars = trimmed.chars();
+    let marker = chars.next()?;
+    if marker != '-' && marker != '*' && marker != '+' {
+        return None;
+    }
+
+    match chars.next() {
+        Some(c) if c == ' ' || c == '\t' => Some(marker),
+        None => Some(marker),
+        _ => None,
+    }
+}
+
+fn thematic_break_marker_for_line(line: &str) -> Option<char> {
+    let trimmed = line.trim_end_matches([' ', '\t', '\r']);
+    let without_indent = trimmed
+        .strip_prefix("   ")
+        .or_else(|| trimmed.strip_prefix("  "))
+        .or_else(|| trimmed.strip_prefix(' '))
+        .unwrap_or(trimmed);
+    let mut marker: Option<char> = None;
+    let mut count = 0usize;
+
+    for ch in without_indent.chars() {
+        if ch == ' ' || ch == '\t' {
+            continue;
+        }
+        if ch != '-' && ch != '*' && ch != '_' {
+            return None;
+        }
+        if let Some(m) = marker {
+            if m != ch {
+                return None;
+            }
+        } else {
+            marker = Some(ch);
+        }
+        count += 1;
+    }
+
+    match (marker, count) {
+        (Some(m), c) if c >= 3 => Some(m),
+        _ => None,
+    }
 }
 
 fn convert_tag(tag: Tag) -> Block {
@@ -173,20 +327,24 @@ fn convert_tag(tag: Tag) -> Block {
         },
         Tag::List(start) => Block::List { start },
         Tag::Item => Block::ListItem,
-        Tag::FootnoteDefinition(_) => Block::Paragraph, // Simplified
-        Tag::Table(_) => Block::Paragraph, // Simplified
-        Tag::TableRow => Block::Paragraph, // Simplified
-        Tag::TableCell => Block::Paragraph, // Simplified
-        Tag::TableHead => Block::Paragraph, // Simplified
+        Tag::FootnoteDefinition(label) => Block::FootnoteDefinition {
+            label: label.to_string(),
+        },
+        Tag::Table(alignments) => Block::Table {
+            alignments: alignments.into_iter().map(convert_alignment).collect(),
+        },
+        Tag::TableRow => Block::TableRow,
+        Tag::TableCell => Block::TableCell,
+        Tag::TableHead => Block::TableHead,
         Tag::Emphasis => Block::Paragraph, // Inline - simplified
-        Tag::Strong => Block::Paragraph, // Inline - simplified
+        Tag::Strong => Block::Paragraph,   // Inline - simplified
         Tag::Strikethrough => Block::Paragraph, // Inline - simplified
         Tag::Link { .. } => Block::Paragraph, // Inline - simplified
         Tag::Image { .. } => Block::Paragraph, // Inline - simplified
         Tag::HtmlBlock => Block::Paragraph, // Simplified
-        Tag::DefinitionList => Block::Paragraph, // Simplified
-        Tag::DefinitionListTitle => Block::Paragraph, // Simplified
-        Tag::DefinitionListDefinition => Block::Paragraph, // Simplified
+        Tag::DefinitionList => Block::DefinitionList,
+        Tag::DefinitionListTitle => Block::DefinitionListTitle,
+        Tag::DefinitionListDefinition => Block::DefinitionListDefinition,
         Tag::MetadataBlock(_) => Block::Paragraph, // Simplified
     }
 }
@@ -202,21 +360,34 @@ fn convert_tag_end(tag: TagEnd) -> Block {
         TagEnd::CodeBlock => Block::CodeBlock { info: None },
         TagEnd::List(_) => Block::List { start: None },
         TagEnd::Item => Block::ListItem,
-        TagEnd::Table => Block::Paragraph,
-        TagEnd::TableRow => Block::Paragraph,
-        TagEnd::TableCell => Block::Paragraph,
-        TagEnd::TableHead => Block::Paragraph,
+        TagEnd::Table => Block::Table {
+            alignments: Vec::new(),
+        },
+        TagEnd::TableRow => Block::TableRow,
+        TagEnd::TableCell => Block::TableCell,
+        TagEnd::TableHead => Block::TableHead,
         TagEnd::Emphasis => Block::Paragraph,
         TagEnd::Strong => Block::Paragraph,
         TagEnd::Strikethrough => Block::Paragraph,
         TagEnd::Link => Block::Paragraph,
         TagEnd::Image => Block::Paragraph,
         TagEnd::HtmlBlock => Block::Paragraph,
-        TagEnd::FootnoteDefinition => Block::Paragraph,
-        TagEnd::DefinitionList => Block::Paragraph,
-        TagEnd::DefinitionListTitle => Block::Paragraph,
-        TagEnd::DefinitionListDefinition => Block::Paragraph,
+        TagEnd::FootnoteDefinition => Block::FootnoteDefinition {
+            label: String::new(),
+        },
+        TagEnd::DefinitionList => Block::DefinitionList,
+        TagEnd::DefinitionListTitle => Block::DefinitionListTitle,
+        TagEnd::DefinitionListDefinition => Block::DefinitionListDefinition,
         TagEnd::MetadataBlock(_) => Block::Paragraph,
+    }
+}
+
+fn convert_alignment(alignment: pulldown_cmark::Alignment) -> CellAlignment {
+    match alignment {
+        pulldown_cmark::Alignment::None => CellAlignment::None,
+        pulldown_cmark::Alignment::Left => CellAlignment::Left,
+        pulldown_cmark::Alignment::Center => CellAlignment::Center,
+        pulldown_cmark::Alignment::Right => CellAlignment::Right,
     }
 }
 

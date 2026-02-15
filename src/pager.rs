@@ -36,6 +36,10 @@ pub struct Pager {
 }
 
 impl Pager {
+    fn max_scroll_position(&self) -> usize {
+        self.lines.len().saturating_sub(self.config.page_size)
+    }
+
     /// Create a new Pager with the given config and content lines
     pub fn new(config: PagerConfig, lines: Vec<String>) -> Self {
         Pager {
@@ -65,7 +69,7 @@ impl Pager {
     /// Scroll down by one page
     pub fn page_down(&mut self) {
         let new_position = self.scroll_position + self.config.page_size;
-        self.scroll_position = cmp::min(new_position, self.lines.len().saturating_sub(1));
+        self.scroll_position = cmp::min(new_position, self.max_scroll_position());
     }
 
     /// Scroll up by one page
@@ -91,10 +95,7 @@ impl Pager {
         }
 
         // Otherwise show progress like "--- More --- (10/50)"
-        Some(format!(
-            "--- More --- ({}/{})",
-            current_pos, total_lines
-        ))
+        Some(format!("--- More --- ({}/{})", current_pos, total_lines))
     }
 
     /// Check if there's more content below
@@ -109,7 +110,7 @@ impl Pager {
 
     /// Go to a specific line
     pub fn go_to_line(&mut self, line: usize) {
-        self.scroll_position = cmp::min(line, self.lines.len().saturating_sub(1));
+        self.scroll_position = cmp::min(line, self.max_scroll_position());
     }
 
     /// Go to the beginning of the content
@@ -119,13 +120,12 @@ impl Pager {
 
     /// Go to the end of the content
     pub fn go_to_end(&mut self) {
-        self.scroll_position = self.lines.len().saturating_sub(self.config.page_size);
-        self.scroll_position = cmp::max(0, self.scroll_position);
+        self.scroll_position = self.max_scroll_position();
     }
 
     /// Scroll down by one line
     pub fn scroll_down(&mut self) {
-        self.scroll_position = cmp::min(self.scroll_position + 1, self.lines.len().saturating_sub(1));
+        self.scroll_position = cmp::min(self.scroll_position + 1, self.max_scroll_position());
     }
 
     /// Scroll up by one line
@@ -226,6 +226,8 @@ impl Pager {
             // Scroll so that the line is near the top of the page
             self.scroll_position = line_idx.saturating_sub(page_size / 2);
         }
+
+        self.scroll_position = cmp::min(self.scroll_position, self.max_scroll_position());
     }
 
     /// Get visible lines with search matches highlighted
@@ -258,7 +260,8 @@ impl Pager {
         let mut last_end = 0;
 
         // Get all matches on this line
-        let line_matches: Vec<usize> = self.search_matches
+        let line_matches: Vec<usize> = self
+            .search_matches
             .iter()
             .filter(|(l, _)| *l == line_num)
             .map(|(_, col)| *col)
@@ -270,9 +273,9 @@ impl Pager {
                 result.push_str(&line[last_end..col]);
             }
             // Add the highlighted match
-            result.push_str("\x1b[1m");  // Bold start
+            result.push_str("\x1b[1m"); // Bold start
             result.push_str(&line[col..col + pattern.len()]);
-            result.push_str("\x1b[0m");  // Bold end
+            result.push_str("\x1b[0m"); // Bold end
             last_end = col + pattern.len();
         }
 
@@ -331,6 +334,7 @@ impl Pager {
             "  N               - Previous search match".to_string(),
             "".to_string(),
             "Other:".to_string(),
+            "  r               - Reload file from disk".to_string(),
             "  h, ?            - Show this help".to_string(),
             "  q, Q, ZZ        - Quit".to_string(),
         ]
@@ -383,5 +387,17 @@ mod tests {
         let pos_after = pager.scroll_position();
 
         assert!(pos_after < pos_before);
+    }
+
+    #[test]
+    fn test_help_mentions_reload_key() {
+        let pager = Pager::new(PagerConfig::default(), vec!["line".to_string()]);
+        let help = pager.help_text();
+        assert!(
+            help.iter()
+                .any(|line| line.contains("r") && line.contains("Reload")),
+            "Expected reload keybinding in help text, got: {:?}",
+            help
+        );
     }
 }

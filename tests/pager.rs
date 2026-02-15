@@ -1,4 +1,4 @@
-use mdless::pager::{Pager, PagerConfig};
+use mdp::pager::{Pager, PagerConfig};
 
 /// Test page down - verify content scrolls down one page
 #[test]
@@ -21,6 +21,25 @@ fn test_page_down() {
 
     // The first visible line should be different (later in the content)
     assert_ne!(first_line, visible_after[0]);
+}
+
+#[test]
+fn test_page_down_clamps_to_last_full_page() {
+    let lines: Vec<String> = (1..=50).map(|i| format!("Line {}", i)).collect();
+    let config = PagerConfig {
+        page_size: 24,
+        ..Default::default()
+    };
+    let mut pager = Pager::new(config, lines);
+
+    pager.page_down();
+    pager.page_down();
+    pager.page_down();
+
+    assert_eq!(pager.scroll_position(), 26);
+    let visible = pager.visible_lines();
+    assert_eq!(visible.first().map(String::as_str), Some("Line 27"));
+    assert_eq!(visible.last().map(String::as_str), Some("Line 50"));
 }
 
 /// Test page up - verify content scrolls up one page
@@ -61,7 +80,10 @@ fn test_progress_indicator() {
 
     // Should show progress indicator when there's more content below
     let indicator = pager.progress_indicator();
-    assert!(indicator.is_some(), "Should show progress indicator when more content below");
+    assert!(
+        indicator.is_some(),
+        "Should show progress indicator when more content below"
+    );
 
     // The indicator should contain "More" or similar text
     let indicator_text = indicator.unwrap();
@@ -163,6 +185,24 @@ fn test_scroll_down_line() {
     assert_eq!(visible_after_two[0], "Line 3");
 }
 
+#[test]
+fn test_scroll_down_stops_at_last_full_page() {
+    let lines: Vec<String> = (1..=50).map(|i| format!("Line {}", i)).collect();
+    let config = PagerConfig {
+        page_size: 24,
+        ..Default::default()
+    };
+    let mut pager = Pager::new(config, lines);
+
+    for _ in 0..100 {
+        pager.scroll_down();
+    }
+
+    assert_eq!(pager.scroll_position(), 26);
+    let visible = pager.visible_lines();
+    assert_eq!(visible.first().map(String::as_str), Some("Line 27"));
+}
+
 /// Test scroll up by one line
 #[test]
 fn test_scroll_up_line() {
@@ -233,6 +273,33 @@ fn test_scroll_to_beginning() {
     assert!(!pager.has_more_above());
 }
 
+/// Test goto beginning command behavior
+#[test]
+fn test_goto_beginning() {
+    let lines: Vec<String> = (1..=30).map(|i| format!("Line {}", i)).collect();
+    let mut pager = Pager::new(PagerConfig::default(), lines);
+
+    pager.go_to_end();
+    assert!(pager.scroll_position() > 0);
+
+    pager.go_to_beginning();
+    assert_eq!(pager.scroll_position(), 0);
+}
+
+/// Test goto end command behavior
+#[test]
+fn test_goto_end() {
+    let lines: Vec<String> = (1..=50).map(|i| format!("Line {}", i)).collect();
+    let config = PagerConfig {
+        page_size: 24,
+        ..Default::default()
+    };
+    let mut pager = Pager::new(config, lines);
+
+    pager.go_to_end();
+    assert_eq!(pager.scroll_position(), 26);
+}
+
 /// Test search forward - search for pattern, verify match found
 #[test]
 fn test_search_forward() {
@@ -275,7 +342,10 @@ fn test_search_highlight() {
 
     // At least one line should contain the bold escape sequence
     let has_highlight = visible.iter().any(|line| line.contains("\x1b[1m"));
-    assert!(has_highlight, "Search match should be highlighted with bold");
+    assert!(
+        has_highlight,
+        "Search match should be highlighted with bold"
+    );
 
     // The highlighted line should contain the search pattern
     let highlighted_line = visible.iter().find(|line| line.contains("Hello")).unwrap();
@@ -301,7 +371,10 @@ fn test_search_no_match() {
     let result = pager.search("nonexistent");
 
     // Should return None (no match found)
-    assert!(result.is_none(), "Should return None when pattern not found");
+    assert!(
+        result.is_none(),
+        "Should return None when pattern not found"
+    );
 
     // The search status message should indicate no match
     let status = pager.search_status_message();
@@ -340,8 +413,14 @@ fn test_search_next() {
     let visible = pager.visible_lines_with_highlight();
 
     // There should be 2 highlighted lines (both "Hello" occurrences)
-    let highlighted_count = visible.iter().filter(|line| line.contains("\x1b[1m")).count();
-    assert_eq!(highlighted_count, 2, "Should have 2 highlighted lines with 'Hello'");
+    let highlighted_count = visible
+        .iter()
+        .filter(|line| line.contains("\x1b[1m"))
+        .count();
+    assert_eq!(
+        highlighted_count, 2,
+        "Should have 2 highlighted lines with 'Hello'"
+    );
 
     // The search status should show we're on match 2 of 2
     let status = pager.search_status_message();
@@ -379,8 +458,13 @@ fn test_search_previous() {
     // Should be on the previous match
     let visible = pager.visible_lines_with_highlight();
     // At least one line should still contain the match highlighted
-    let has_highlight = visible.iter().any(|line| line.contains("Hello") && line.contains("\x1b[1m"));
-    assert!(has_highlight, "Should still have highlighted match after search_previous");
+    let has_highlight = visible
+        .iter()
+        .any(|line| line.contains("Hello") && line.contains("\x1b[1m"));
+    assert!(
+        has_highlight,
+        "Should still have highlighted match after search_previous"
+    );
 }
 
 /// Test help screen - verify help displays keybindings
@@ -419,7 +503,10 @@ fn test_help_keybindings() {
 
     // Should list navigation commands (up/down arrows or j/k)
     assert!(
-        help_string.contains("j") || help_string.contains("down") || help_string.contains("k") || help_string.contains("up"),
+        help_string.contains("j")
+            || help_string.contains("down")
+            || help_string.contains("k")
+            || help_string.contains("up"),
         "Help should list navigation keys (j/k or arrows), got: {}",
         help_string
     );
@@ -440,7 +527,10 @@ fn test_help_keybindings() {
 
     // Should list go to beginning/end (g/G)
     assert!(
-        help_string.contains("g") || help_string.contains("G") || help_string.contains("beginning") || help_string.contains("end"),
+        help_string.contains("g")
+            || help_string.contains("G")
+            || help_string.contains("beginning")
+            || help_string.contains("end"),
         "Help should list go to beginning/end keys, got: {}",
         help_string
     );

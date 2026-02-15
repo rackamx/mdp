@@ -1,4 +1,4 @@
-# mdless - Markdown Pager Plan
+# mdp - Markdown Pager Plan
 
 ## Context
 
@@ -21,8 +21,12 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
 
 ## Task Breakdown
 
+## Status Snapshot (2026-02-15)
+
+- DONE: T01-T37
+
 ### T01 - Project Setup
-- Initialize Rust project with `cargo new mdless`
+- Initialize Rust project with `cargo new mdp`
 - Add dependencies: `pulldown-cmark`, `crossterm`, `clap` (for CLI args)
 - Verify project compiles with `cargo build`
 
@@ -293,6 +297,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_horizontal_rule_asterisks()` - render `***`, verify "---" output
   - `test_render_horizontal_rule_underscores()` - render `___`, verify "---" output
 
+**Status**: DONE
+
 ---
 
 ### T17 - Strikethrough Text Rendering
@@ -304,6 +310,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_strikethrough()` - render `~~text~~`, verify `\x1b[9m` codes
   - `test_render_strikethrough_mixed()` - render "normal ~~strikethrough~~ normal"
 
+**Status**: DONE
+
 ---
 
 ### T18 - Line Break Handling
@@ -314,6 +322,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
 - `tests/rendering.rs`:
   - `test_render_soft_break()` - single newline in paragraph renders as space
   - `test_render_hard_break()` - two spaces + newline renders as line break
+
+**Status**: DONE
 
 ---
 
@@ -327,6 +337,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_goto_beginning()` - verify `g` jumps to first line
   - `test_goto_end()` - verify `G` jumps to last line
 
+**Status**: DONE
+
 ---
 
 ### T20 - Empty File Handling
@@ -337,6 +349,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
 - `tests/file_loading.rs`:
   - `test_empty_file()` - verify graceful handling of empty .md file
 
+**Status**: DONE
+
 ---
 
 ### T21 - Long Line Handling
@@ -346,6 +360,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
 **Tests**:
 - `tests/rendering.rs`:
   - `test_render_very_long_line()` - verify wrapping for lines > 200 chars
+
+**Status**: DONE
 
 ---
 
@@ -359,6 +375,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_emoji()` - verify emoji display
   - `test_render_cjk_characters()` - verify CJK characters display correctly
 
+**Status**: DONE
+
 ---
 
 ### T23 - Terminal Resize Handling
@@ -368,6 +386,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
 **Tests**:
 - `tests/terminal.rs`:
   - `test_terminal_resize()` - verify rendering adapts to new terminal size
+
+**Status**: DONE
 
 ---
 
@@ -380,6 +400,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_parse_unclosed_fence()` - handle unclosed code fence
   - `test_parse_mismatched_brackets()` - handle `[text` without closing bracket
   - `test_parse_incomplete_emphasis()` - handle unclosed `**`
+
+**Status**: DONE
 
 ---
 
@@ -403,6 +425,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_display_filename()` - verify file name shown in header
   - `test_stdin_label()` - verify "(stdin)" shown for stdin input
 
+**Status**: DONE
+
 ---
 
 ### T27 - CLI Options and Default Width
@@ -419,6 +443,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_width_option()` - verify `--width` sets custom column width
   - `test_help_output()` - verify help message displays correctly
 
+**Status**: DONE
+
 ---
 
 ### T28 - Exit Codes
@@ -431,6 +457,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_exit_code_success()` - verify returns 0 on success
   - `test_exit_code_file_error()` - verify returns 1 on file error
 
+**Status**: DONE
+
 ---
 
 ### T29 - Integration Tests
@@ -442,17 +470,21 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_full_render_sample()` - render complete sample.md file
   - `test_navigation_sample()` - test navigation with sample file
 
+**Status**: DONE
+
 ---
 
 ### T30 - Stdin Support
 - Read from stdin when no file is provided or with `-` argument
-- Support piping: `cat file.md | mdless`
+- Support piping: `cat file.md | mdp`
 - Support stdin with other flags
 
 **Tests**:
 - `tests/file_loading.rs`:
   - `test_read_from_stdin()` - verify stdin reading works
-  - `test_stdin_with_flag()` - verify `mdless -` reads from stdin
+  - `test_stdin_with_flag()` - verify `mdp -` reads from stdin
+
+**Status**: DONE
 
 ---
 
@@ -467,6 +499,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_table_alignment()` - verify left/right/center alignment
   - `test_render_table_fallback()` - verify fallback for wide tables
 
+**Status**: DONE
+
 ---
 
 ### T32 - Task List Rendering
@@ -478,6 +512,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_task_list_unchecked()` - render `- [ ] item`
   - `test_render_task_list_checked()` - render `- [x] item`
   - `test_render_task_list_mixed()` - render mixed checked/unchecked
+
+**Status**: DONE
 
 ---
 
@@ -491,6 +527,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_ctrl_c_cleanup()` - verify terminal restores on Ctrl+C
   - `test_sigint_exit_code()` - verify returns 130 on SIGINT
 
+**Status**: DONE
+
 ---
 
 ### T34 - Footnote Rendering
@@ -502,6 +540,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_footnote_reference()` - render `[^1]` in text
   - `test_render_footnote_definition()` - render `[^1]: definition`
 
+**Status**: DONE
+
 ---
 
 ### T35 - Definition List Rendering
@@ -510,6 +550,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
 **Tests**:
 - `tests/rendering.rs`:
   - `test_render_definition_list()` - render "Term : Definition" format
+
+**Status**: DONE
 
 ---
 
@@ -525,6 +567,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_endash()` - verify `--` → `–`
   - `test_render_emdash()` - verify `---` → `—`
 
+**Status**: DONE
+
 ---
 
 ### T37 - Binary File Detection
@@ -536,6 +580,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
 - `tests/file_loading.rs`:
   - `test_binary_file_rejected()` - verify binary file shows error
   - `test_text_file_accepted()` - verify text file works normally
+
+**Status**: DONE
 
 ---
 
@@ -555,7 +601,7 @@ After implementing tasks:
 7. Test all edge cases: empty files, long lines, unicode, malformed markdown
 8. Verify exit codes
 9. Test CLI options work correctly
-10. Test stdin: `cat file.md | mdless`
+10. Test stdin: `cat file.md | mdp`
 11. Test table rendering
 12. Test task lists
 13. Test Ctrl+C handling
