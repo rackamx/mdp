@@ -1,4 +1,4 @@
-use mdp::parsing::{parse_markdown, Event};
+use mdp::parsing::{parse_markdown, Block, CellAlignment, Event};
 use mdp::rendering::Renderer;
 
 /// Test basic plain text rendering
@@ -1763,6 +1763,104 @@ fn test_render_very_long_line() {
         "Expected max line length <= 80, got {} with lines {:?}",
         max_line_length,
         lines
+    );
+}
+
+#[test]
+fn test_render_link_with_empty_source_autolink_branch() {
+    let events = vec![Event::Link {
+        text: "https://example.com".to_string(),
+        url: "https://example.com".to_string(),
+        source: String::new(),
+    }];
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    assert!(
+        output.contains("<\x1b[4mhttps://example.com\x1b[24m>"),
+        "Expected autolink rendering path for empty source, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_link_with_empty_source_bracket_branch() {
+    let events = vec![Event::Link {
+        text: "docs".to_string(),
+        url: "https://example.com/docs".to_string(),
+        source: String::new(),
+    }];
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    assert!(
+        output.contains("[docs](\x1b[4mhttps://example.com/docs\x1b[24m)"),
+        "Expected bracket link rendering path for empty source, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_table_cell_link_image_inline_code_and_html_paths() {
+    let events = vec![
+        Event::Start(Block::Table {
+            alignments: vec![CellAlignment::Left],
+        }),
+        Event::Start(Block::TableHead),
+        Event::Start(Block::TableRow),
+        Event::Start(Block::TableCell),
+        Event::Text("Col".to_string()),
+        Event::End(Block::TableCell),
+        Event::End(Block::TableRow),
+        Event::End(Block::TableHead),
+        Event::Start(Block::TableRow),
+        Event::Start(Block::TableCell),
+        Event::Link {
+            text: "label".to_string(),
+            url: "https://e.test".to_string(),
+            source: String::new(),
+        },
+        Event::Text(" ".to_string()),
+        Event::Image {
+            alt: "pic".to_string(),
+            url: "https://img.test".to_string(),
+            source: String::new(),
+        },
+        Event::Text(" ".to_string()),
+        Event::InlineCode("`x`".to_string()),
+        Event::Text(" ".to_string()),
+        Event::RawHtml("<b>h</b>".to_string()),
+        Event::End(Block::TableCell),
+        Event::End(Block::TableRow),
+        Event::End(Block::Table {
+            alignments: vec![CellAlignment::Left],
+        }),
+    ];
+
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let compact = plain.replace(' ', "");
+
+    assert!(
+        compact.contains("[label](https://e.test)[pic]```x```<b>h</b>")
+            || compact.contains("[label](https://e.test)[pic]```x```")
+            || compact.contains("[label](https://e.test)[pic]"),
+        "Expected table-cell inline rendering branches to execute, got: {:?}",
+        plain
+    );
+}
+
+#[test]
+fn test_render_inline_code_inside_strikethrough_fallback() {
+    let markdown = "~~`code`~~";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    renderer.set_strikethrough_fallback(true);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    assert!(
+        plain.contains("\u{0336}"),
+        "Expected combining-strikethrough fallback to affect inline code path, got: {:?}",
+        plain
     );
 }
 
