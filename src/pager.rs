@@ -27,6 +27,12 @@ pub struct Pager {
     scroll_position: usize,
     /// Configuration
     config: PagerConfig,
+    /// Current search pattern
+    search_pattern: Option<String>,
+    /// List of (line_index, column_index) for search matches
+    search_matches: Vec<(usize, usize)>,
+    /// Index of current match in search_matches
+    current_match_index: Option<usize>,
 }
 
 impl Pager {
@@ -36,6 +42,9 @@ impl Pager {
             lines,
             scroll_position: 0,
             config,
+            search_pattern: None,
+            search_matches: Vec::new(),
+            current_match_index: None,
         }
     }
 
@@ -132,6 +141,175 @@ impl Pager {
     /// Get the current scroll position (0-indexed)
     pub fn scroll_position(&self) -> usize {
         self.scroll_position
+    }
+
+    /// Search for a pattern in the content
+    /// Returns Some((line_index, column_index)) of first match, or None if not found
+    pub fn search(&mut self, pattern: &str) -> Option<(usize, usize)> {
+        if pattern.is_empty() {
+            self.search_pattern = None;
+            self.search_matches.clear();
+            self.current_match_index = None;
+            return None;
+        }
+
+        self.search_pattern = Some(pattern.to_string());
+        self.search_matches.clear();
+
+        // Find all matches
+        for (line_idx, line) in self.lines.iter().enumerate() {
+            let mut search_start = 0;
+            while let Some(pos) = line[search_start..].find(pattern) {
+                let absolute_pos = search_start + pos;
+                self.search_matches.push((line_idx, absolute_pos));
+                search_start = absolute_pos + 1;
+            }
+        }
+
+        if self.search_matches.is_empty() {
+            self.current_match_index = None;
+            return None;
+        }
+
+        // Set current match to first match
+        self.current_match_index = Some(0);
+        let (line_idx, col_idx) = self.search_matches[0];
+
+        // Scroll to the match
+        self.scroll_to_show_line(line_idx);
+
+        Some((line_idx, col_idx))
+    }
+
+    /// Go to the next search match
+    pub fn search_next(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+
+        let current_idx = self.current_match_index.unwrap_or(0);
+        let next_idx = (current_idx + 1) % self.search_matches.len();
+        self.current_match_index = Some(next_idx);
+
+        let (line_idx, _) = self.search_matches[next_idx];
+        self.scroll_to_show_line(line_idx);
+    }
+
+    /// Go to the previous search match
+    pub fn search_previous(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+
+        let current_idx = self.current_match_index.unwrap_or(0);
+        let prev_idx = if current_idx == 0 {
+            self.search_matches.len() - 1
+        } else {
+            current_idx - 1
+        };
+        self.current_match_index = Some(prev_idx);
+
+        let (line_idx, _) = self.search_matches[prev_idx];
+        self.scroll_to_show_line(line_idx);
+    }
+
+    /// Scroll to show a specific line
+    fn scroll_to_show_line(&mut self, line_idx: usize) {
+        let page_size = self.config.page_size;
+
+        // If the line is before current view, scroll up
+        if line_idx < self.scroll_position {
+            self.scroll_position = line_idx;
+        }
+        // If the line is after current view, scroll down
+        else if line_idx >= self.scroll_position + page_size {
+            // Scroll so that the line is near the top of the page
+            self.scroll_position = line_idx.saturating_sub(page_size / 2);
+        }
+    }
+
+    /// Get visible lines with search matches highlighted
+    pub fn visible_lines_with_highlight(&self) -> Vec<String> {
+        let pattern = match &self.search_pattern {
+            Some(p) => p,
+            None => return self.visible_lines(),
+        };
+
+        let visible = self.visible_lines();
+        let start_line = self.scroll_position;
+
+        visible
+            .iter()
+            .enumerate()
+            .map(|(idx, line)| {
+                let line_num = start_line + idx;
+                self.highlight_pattern(line, pattern, line_num)
+            })
+            .collect()
+    }
+
+    /// Highlight all occurrences of a pattern in a line
+    fn highlight_pattern(&self, line: &str, pattern: &str, line_num: usize) -> String {
+        if !self.search_matches.iter().any(|(l, _)| *l == line_num) {
+            return line.to_string();
+        }
+
+        let mut result = String::new();
+        let mut last_end = 0;
+
+        // Get all matches on this line
+        let line_matches: Vec<usize> = self.search_matches
+            .iter()
+            .filter(|(l, _)| *l == line_num)
+            .map(|(_, col)| *col)
+            .collect();
+
+        for col in line_matches {
+            // Add text before the match
+            if col > last_end {
+                result.push_str(&line[last_end..col]);
+            }
+            // Add the highlighted match
+            result.push_str("\x1b[1m");  // Bold start
+            result.push_str(&line[col..col + pattern.len()]);
+            result.push_str("\x1b[0m");  // Bold end
+            last_end = col + pattern.len();
+        }
+
+        // Add remaining text after last match
+        if last_end < line.len() {
+            result.push_str(&line[last_end..]);
+        }
+
+        result
+    }
+
+    /// Get the search status message
+    pub fn search_status_message(&self) -> String {
+        match &self.search_pattern {
+            Some(pattern) => {
+                if self.search_matches.is_empty() {
+                    format!("Pattern '{}' not found", pattern)
+                } else if let Some(idx) = self.current_match_index {
+                    format!(
+                        "Search: '{}' ({}/{})",
+                        pattern,
+                        idx + 1,
+                        self.search_matches.len()
+                    )
+                } else {
+                    format!("Search: '{}'", pattern)
+                }
+            }
+            None => String::new(),
+        }
+    }
+
+    /// Clear the current search
+    pub fn clear_search(&mut self) {
+        self.search_pattern = None;
+        self.search_matches.clear();
+        self.current_match_index = None;
     }
 }
 

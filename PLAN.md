@@ -256,6 +256,7 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
 ### T14 - Search (Optional Enhancement)
 - Add basic search with `/` pattern
 - Highlight matches
+- Support `n` for next match, `N` for previous match
 
 **Tests**:
 - `tests/pager.rs`:
@@ -263,6 +264,9 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_search_highlight()` - verify match is highlighted with bold
   - `test_search_no_match()` - verify "Pattern not found" message
   - `test_search_next()` - verify `n` key finds next match
+  - `test_search_previous()` - verify `N` key finds previous match
+
+**Status**: DONE
 
 ---
 
