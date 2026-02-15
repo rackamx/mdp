@@ -623,3 +623,11 @@ After implementing tasks:
 - [x] ASAN acceptance criteria: command is documented in `README.md` and exits non-zero on sanitizer findings.
 - [x] ASAN acceptance criteria: mode runs regression tests (`cargo test --tests`), and any exclusions are documented.
 - [x] Coverage acceptance criteria: keep coverage at or above 90% for regions/functions/lines (`make coverage-gate`).
+- [ ] Trim dependency feature sets (`clap`, `crossterm`, `pulldown-cmark`) to reduce release size and transitive dependencies while preserving behavior.
+- [ ] Add `Sanitizers` and `Security` workflow badges to `README.md` alongside CI and Coverage.
+- [ ] Add `CONTRIBUTING.md` with local pre-push checks (`fmt`, `clippy -D warnings`, `test`, `coverage-gate`), commit message format, and release/tag flow.
+- [ ] Add a repository `deny.toml` configuration for `cargo deny` to make security/license policy explicit and reproducible.
+- [ ] Extend `release-check.yml` to create/publish GitHub Releases on `v*` tags with attached binaries and release notes.
+- [ ] Add a performance regression workflow/job that runs benchmark mode and fails on significant regressions.
+- [ ] Expand CI smoke coverage with non-interactive sample runs and a lightweight PTY interactive smoke test.
+- [ ] Add a short architecture/testing section in `README.md` describing parser -> renderer -> pager flow and targeted test commands.
