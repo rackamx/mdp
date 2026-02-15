@@ -249,6 +249,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_scroll_to_end()` - verify behavior at EOF
   - `test_scroll_to_beginning()` - verify behavior at BOF
 
+**Status**: DONE
+
 ---
 
 ### T14 - Search (Optional Enhancement)

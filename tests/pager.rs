@@ -137,3 +137,98 @@ fn test_page_down_at_end() {
     let visible = pager.visible_lines();
     assert!(!visible.is_empty());
 }
+
+/// Test scroll down by one line
+#[test]
+fn test_scroll_down_line() {
+    // Create a pager with test content (more than one page)
+    let lines: Vec<String> = (1..=50).map(|i| format!("Line {}", i)).collect();
+    let mut pager = Pager::new(PagerConfig::default(), lines);
+
+    // Initial state should show first page (lines 1-24 typically)
+    let visible = pager.visible_lines();
+    let first_line = visible[0].clone();
+
+    // Scroll down by one line
+    pager.scroll_down();
+    let visible_after = pager.visible_lines();
+
+    // Should have scrolled by exactly one line
+    assert_eq!(visible_after[0], "Line 2");
+    assert_ne!(first_line, visible_after[0]);
+
+    // Scroll down another line
+    pager.scroll_down();
+    let visible_after_two = pager.visible_lines();
+    assert_eq!(visible_after_two[0], "Line 3");
+}
+
+/// Test scroll up by one line
+#[test]
+fn test_scroll_up_line() {
+    // Create a pager with test content
+    let lines: Vec<String> = (1..=50).map(|i| format!("Line {}", i)).collect();
+    let mut pager = Pager::new(PagerConfig::default(), lines);
+
+    // Move down a few lines first
+    pager.scroll_down();
+    pager.scroll_down();
+    pager.scroll_down();
+
+    let visible_before = pager.visible_lines();
+    let first_visible_before = visible_before[0].clone();
+    assert_eq!(first_visible_before, "Line 4");
+
+    // Scroll up by one line
+    pager.scroll_up();
+    let visible_after = pager.visible_lines();
+
+    // Should have scrolled up by exactly one line
+    assert_eq!(visible_after[0], "Line 3");
+}
+
+/// Test scroll to end of content
+#[test]
+fn test_scroll_to_end() {
+    // Create a pager with test content
+    let lines: Vec<String> = (1..=50).map(|i| format!("Line {}", i)).collect();
+    let mut pager = Pager::new(PagerConfig::default(), lines);
+
+    // Go to end
+    pager.go_to_end();
+
+    // Should show last lines (within page size)
+    let visible = pager.visible_lines();
+    let last_line = visible.last().unwrap().clone();
+
+    // The last visible line should be near the end of content
+    assert!(last_line.contains("Line 50") || last_line.contains("Line 49"));
+
+    // has_more_below should be false at end
+    assert!(!pager.has_more_below());
+}
+
+/// Test scroll to beginning of content
+#[test]
+fn test_scroll_to_beginning() {
+    // Create a pager with test content
+    let lines: Vec<String> = (1..=50).map(|i| format!("Line {}", i)).collect();
+    let mut pager = Pager::new(PagerConfig::default(), lines);
+
+    // First move away from the beginning
+    pager.go_to_end();
+    assert!(pager.scroll_position() > 0);
+
+    // Go to beginning
+    pager.go_to_beginning();
+
+    // Should be back at start
+    assert_eq!(pager.scroll_position(), 0);
+
+    // First visible line should be Line 1
+    let visible = pager.visible_lines();
+    assert_eq!(visible[0], "Line 1");
+
+    // has_more_above should be false at beginning
+    assert!(!pager.has_more_above());
+}
