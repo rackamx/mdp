@@ -203,6 +203,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_url_auto_link()` - render `<https://example.com>`, verify URL shown
   - `test_render_email_auto_link()` - render `<user@example.com>`, verify email shown
 
+**Status**: DONE
+
 ---
 
 ### T11c - Escape Sequence Handling

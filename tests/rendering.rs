@@ -547,3 +547,37 @@ fn test_render_image_alt_text() {
             "Expected 'alt text' in output, got: {:?}", output);
     // Should render as "[alt text]" format (not actual image)
 }
+
+/// Test URL auto-link rendering - <https://example.com> should render as "https://example.com (https://example.com)"
+#[test]
+fn test_render_url_auto_link() {
+    let markdown = "<https://example.com>";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the URL
+    assert!(output.contains("https://example.com"),
+            "Expected 'https://example.com' in output, got: {:?}", output);
+    // Should render as "url (url)" format
+    assert!(output.contains("https://example.com (https://example.com)"),
+            "Expected 'https://example.com (https://example.com)' in output, got: {:?}", output);
+}
+
+/// Test email auto-link rendering - <user@example.com> should render as "user@example.com (user@example.com)"
+#[test]
+fn test_render_email_auto_link() {
+    let markdown = "<user@example.com>";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the email
+    assert!(output.contains("user@example.com"),
+            "Expected 'user@example.com' in output, got: {:?}", output);
+    // Should render as "email (email)" format
+    assert!(output.contains("user@example.com (user@example.com)"),
+            "Expected 'user@example.com (user@example.com)' in output, got: {:?}", output);
+}
