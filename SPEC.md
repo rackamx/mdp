@@ -623,7 +623,7 @@ After implementing tasks:
 - [x] ASAN acceptance criteria: command is documented in `README.md` and exits non-zero on sanitizer findings.
 - [x] ASAN acceptance criteria: mode runs regression tests (`cargo test --tests`), and any exclusions are documented.
 - [x] Coverage acceptance criteria: keep coverage at or above 90% for regions/functions/lines (`make coverage-gate`).
-- [ ] Trim dependency feature sets (`clap`, `crossterm`, `pulldown-cmark`) to reduce release size and transitive dependencies while preserving behavior.
+- [x] Trim dependency feature sets (`clap`, `crossterm`, `pulldown-cmark`) to reduce release size and transitive dependencies while preserving behavior.
 - [ ] Add `Sanitizers` and `Security` workflow badges to `README.md` alongside CI and Coverage.
 - [ ] Add `CONTRIBUTING.md` with local pre-push checks (`fmt`, `clippy -D warnings`, `test`, `coverage-gate`), commit message format, and release/tag flow.
 - [ ] Add a repository `deny.toml` configuration for `cargo deny` to make security/license policy explicit and reproducible.

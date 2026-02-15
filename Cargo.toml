@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 pulldown-cmark = "0.12"
-crossterm = "0.28"
-clap = "4.5"
+crossterm = { version = "0.28", default-features = false, features = ["events", "windows"] }
+clap = { version = "4.5", default-features = false, features = ["std", "help", "usage"] }
 
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }
