@@ -339,6 +339,76 @@ impl PagerNavigation for Pager {
     }
 }
 
+trait EventSource {
+    fn poll(&mut self, timeout: Duration) -> Result<bool, io::Error>;
+    fn read(&mut self) -> Result<CEvent, io::Error>;
+}
+
+struct CrosstermEventSource;
+
+impl EventSource for CrosstermEventSource {
+    fn poll(&mut self, timeout: Duration) -> Result<bool, io::Error> {
+        event::poll(timeout)
+    }
+
+    fn read(&mut self) -> Result<CEvent, io::Error> {
+        event::read()
+    }
+}
+
+trait TerminalSizeProvider {
+    fn size(&self) -> Result<mdp::terminal::Size, io::Error>;
+}
+
+impl TerminalSizeProvider for Terminal {
+    fn size(&self) -> Result<mdp::terminal::Size, io::Error> {
+        Terminal::size(self)
+    }
+}
+
+trait PagerScreen {
+    fn draw_page(
+        &mut self,
+        pager: &Pager,
+        source_label: &str,
+        status_message: Option<&str>,
+        cache: &mut FrameCache,
+    ) -> Result<(), io::Error>;
+    fn prompt_search(&mut self, pager: &Pager, source_label: &str) -> Result<Option<String>, io::Error>;
+    fn draw_help(&mut self, help_lines: &[String]) -> Result<(), io::Error>;
+    fn clear(&mut self) -> Result<(), io::Error>;
+}
+
+struct CrosstermScreen;
+
+impl PagerScreen for CrosstermScreen {
+    fn draw_page(
+        &mut self,
+        pager: &Pager,
+        source_label: &str,
+        status_message: Option<&str>,
+        cache: &mut FrameCache,
+    ) -> Result<(), io::Error> {
+        draw_page(pager, source_label, status_message, cache)
+    }
+
+    fn prompt_search(&mut self, pager: &Pager, source_label: &str) -> Result<Option<String>, io::Error> {
+        prompt_search(pager, source_label)
+    }
+
+    fn draw_help(&mut self, help_lines: &[String]) -> Result<(), io::Error> {
+        draw_help(help_lines)
+    }
+
+    fn clear(&mut self) -> Result<(), io::Error> {
+        let mut stdout = io::stdout();
+        stdout.execute(MoveTo(0, 0))?;
+        stdout.execute(Clear(ClearType::All))?;
+        stdout.flush()?;
+        Ok(())
+    }
+}
+
 fn key_event_to_action(code: KeyCode) -> PagerKeyAction {
     match code {
         KeyCode::Char('q') | KeyCode::Char('Q') => PagerKeyAction::Quit,
@@ -381,9 +451,38 @@ fn run_interactive_pager(
 ) -> Result<(), io::Error> {
     install_sigint_handler();
     let terminal = Terminal::new()?;
+    let mut events = CrosstermEventSource;
+    let mut screen = CrosstermScreen;
+    run_interactive_pager_with(
+        &terminal,
+        &mut events,
+        &mut screen,
+        &mut markdown,
+        width_override,
+        strikethrough_fallback,
+        source_label,
+        reload_path,
+    )
+}
+
+fn run_interactive_pager_with<T, E, S>(
+    terminal: &T,
+    events: &mut E,
+    screen: &mut S,
+    markdown: &mut String,
+    width_override: Option<usize>,
+    strikethrough_fallback: bool,
+    source_label: &str,
+    reload_path: Option<&str>,
+) -> Result<(), io::Error>
+where
+    T: TerminalSizeProvider,
+    E: EventSource,
+    S: PagerScreen,
+{
     let size = terminal.size()?;
     let mut pager = build_pager(
-        &markdown,
+        markdown,
         usize::from(size.rows),
         usize::from(size.cols),
         0,
@@ -392,7 +491,7 @@ fn run_interactive_pager(
     );
     let mut status_message: Option<String> = None;
     let mut frame_cache = FrameCache::default();
-    draw_page(
+    screen.draw_page(
         &pager,
         source_label,
         status_message.as_deref(),
@@ -404,15 +503,15 @@ fn run_interactive_pager(
             return Err(io::Error::new(io::ErrorKind::Interrupted, "SIGINT"));
         }
 
-        if !event::poll(Duration::from_millis(100))? {
+        if !events.poll(Duration::from_millis(100))? {
             continue;
         }
-        let event = event::read()?;
+        let event = events.read()?;
         let key_event = match event {
             CEvent::Resize(new_cols, new_rows) => {
                 let old_scroll = pager.scroll_position();
                 pager = build_pager(
-                    &markdown,
+                    markdown,
                     usize::from(new_rows),
                     usize::from(new_cols),
                     old_scroll,
@@ -420,7 +519,7 @@ fn run_interactive_pager(
                     strikethrough_fallback,
                 );
                 frame_cache = FrameCache::default();
-                draw_page(
+                screen.draw_page(
                     &pager,
                     source_label,
                     status_message.as_deref(),
@@ -446,7 +545,7 @@ fn run_interactive_pager(
         let action = key_event_to_action(key_event.code);
         match action {
             PagerKeyAction::Quit => break,
-            PagerKeyAction::SearchPrompt => match prompt_search(&pager, source_label)? {
+            PagerKeyAction::SearchPrompt => match screen.prompt_search(&pager, source_label)? {
                 Some(pattern) if pattern.is_empty() => {
                     pager.clear_search();
                     status_message = Some("Search cleared".to_string());
@@ -458,14 +557,14 @@ fn run_interactive_pager(
                     status_message = Some("Search canceled".to_string());
                 }
             },
-            PagerKeyAction::ShowHelp => draw_help(&pager.help_text())?,
+            PagerKeyAction::ShowHelp => screen.draw_help(&pager.help_text())?,
             PagerKeyAction::Reload => match reload_markdown(reload_path) {
                 Ok(Some(reloaded)) => {
-                    markdown = reloaded;
+                    *markdown = reloaded;
                     let old_scroll = pager.scroll_position();
                     let size = terminal.size()?;
                     pager = build_pager(
-                        &markdown,
+                        markdown,
                         usize::from(size.rows),
                         usize::from(size.cols),
                         old_scroll,
@@ -485,7 +584,7 @@ fn run_interactive_pager(
                 let _ = apply_navigation_action(&mut pager, action);
             }
         }
-        draw_page(
+        screen.draw_page(
             &pager,
             source_label,
             status_message.as_deref(),
@@ -493,10 +592,7 @@ fn run_interactive_pager(
         )?;
     }
 
-    let mut stdout = io::stdout();
-    stdout.execute(MoveTo(0, 0))?;
-    stdout.execute(Clear(ClearType::All))?;
-    stdout.flush()?;
+    screen.clear()?;
     Ok(())
 }
 
@@ -566,6 +662,7 @@ mod tests {
         PagerKeyAction, PagerNavigation, SIGINT_RECEIVED,
     };
     use mdp::pager::{Pager, PagerConfig};
+    use std::collections::VecDeque;
     use std::io;
     use std::fs;
     use std::sync::atomic::Ordering;
@@ -929,6 +1026,264 @@ mod tests {
         let pager = build_pager("", 10, 80, 0, None, true);
         assert_eq!(pager.total_lines(), 1, "pager should contain one empty line");
         assert_eq!(pager.visible_lines(), vec![String::new()]);
+    }
+
+    struct MockTerminal {
+        size: mdp::terminal::Size,
+    }
+
+    impl super::TerminalSizeProvider for MockTerminal {
+        fn size(&self) -> Result<mdp::terminal::Size, io::Error> {
+            Ok(self.size)
+        }
+    }
+
+    struct MockEventSource {
+        poll_responses: VecDeque<bool>,
+        events: VecDeque<crossterm::event::Event>,
+    }
+
+    impl MockEventSource {
+        fn with_events(events: Vec<crossterm::event::Event>) -> Self {
+            Self {
+                poll_responses: VecDeque::new(),
+                events: events.into(),
+            }
+        }
+    }
+
+    impl super::EventSource for MockEventSource {
+        fn poll(&mut self, _timeout: std::time::Duration) -> Result<bool, io::Error> {
+            if let Some(v) = self.poll_responses.pop_front() {
+                return Ok(v);
+            }
+            Ok(!self.events.is_empty())
+        }
+
+        fn read(&mut self) -> Result<crossterm::event::Event, io::Error> {
+            self.events
+                .pop_front()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "no events"))
+        }
+    }
+
+    #[derive(Default)]
+    struct MockScreen {
+        draw_count: usize,
+        help_calls: usize,
+        cleared: bool,
+        prompt_queue: VecDeque<Option<String>>,
+        statuses: Vec<Option<String>>,
+    }
+
+    impl super::PagerScreen for MockScreen {
+        fn draw_page(
+            &mut self,
+            _pager: &Pager,
+            _source_label: &str,
+            status_message: Option<&str>,
+            _cache: &mut super::FrameCache,
+        ) -> Result<(), io::Error> {
+            self.draw_count += 1;
+            self.statuses
+                .push(status_message.map(std::string::ToString::to_string));
+            Ok(())
+        }
+
+        fn prompt_search(
+            &mut self,
+            _pager: &Pager,
+            _source_label: &str,
+        ) -> Result<Option<String>, io::Error> {
+            Ok(self.prompt_queue.pop_front().unwrap_or(None))
+        }
+
+        fn draw_help(&mut self, _help_lines: &[String]) -> Result<(), io::Error> {
+            self.help_calls += 1;
+            Ok(())
+        }
+
+        fn clear(&mut self) -> Result<(), io::Error> {
+            self.cleared = true;
+            Ok(())
+        }
+    }
+
+    fn key_press(code: crossterm::event::KeyCode) -> crossterm::event::Event {
+        crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::NONE,
+        ))
+    }
+
+    #[test]
+    fn test_interactive_core_handles_resize_and_quit() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![
+            crossterm::event::Event::Resize(100, 20),
+            key_press(crossterm::event::KeyCode::Char('q')),
+        ]);
+        let mut screen = MockScreen::default();
+        let mut markdown = "# title\n\nbody".to_string();
+
+        let result = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "spec.md",
+            Some("/tmp/spec.md"),
+        );
+
+        assert!(result.is_ok(), "interactive loop should exit cleanly");
+        assert!(
+            screen.draw_count >= 2,
+            "expected at least initial + post-resize draw"
+        );
+        assert!(screen.cleared, "expected screen clear on normal exit");
+    }
+
+    #[test]
+    fn test_interactive_core_ctrl_c_returns_interrupted() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![crossterm::event::Event::Key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('c'),
+                crossterm::event::KeyModifiers::CONTROL,
+            ),
+        )]);
+        let mut screen = MockScreen::default();
+        let mut markdown = "body".to_string();
+
+        let err = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        )
+        .expect_err("ctrl-c should interrupt loop");
+
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert!(!screen.cleared, "should not clear screen on interrupted error");
+    }
+
+    #[test]
+    fn test_interactive_core_show_help_and_quit() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![
+            key_press(crossterm::event::KeyCode::Char('h')),
+            key_press(crossterm::event::KeyCode::Char('q')),
+        ]);
+        let mut screen = MockScreen::default();
+        let mut markdown = "body".to_string();
+
+        let result = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(screen.help_calls, 1);
+    }
+
+    #[test]
+    fn test_interactive_core_search_prompt_statuses() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![
+            key_press(crossterm::event::KeyCode::Char('/')),
+            key_press(crossterm::event::KeyCode::Char('/')),
+            key_press(crossterm::event::KeyCode::Char('q')),
+        ]);
+        let mut screen = MockScreen::default();
+        screen.prompt_queue.push_back(Some(String::new()));
+        screen.prompt_queue.push_back(None);
+        let mut markdown = "alpha beta".to_string();
+
+        let result = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        );
+        assert!(result.is_ok());
+        assert!(
+            screen
+                .statuses
+                .iter()
+                .flatten()
+                .any(|s| s == "Search cleared"),
+            "expected 'Search cleared' status to be drawn"
+        );
+        assert!(
+            screen
+                .statuses
+                .iter()
+                .flatten()
+                .any(|s| s == "Search canceled"),
+            "expected 'Search canceled' status to be drawn"
+        );
+    }
+
+    #[test]
+    fn test_interactive_core_reload_without_path_sets_status() {
+        SIGINT_RECEIVED.store(false, Ordering::SeqCst);
+        let terminal = MockTerminal {
+            size: mdp::terminal::Size { rows: 8, cols: 40 },
+        };
+        let mut events = MockEventSource::with_events(vec![
+            key_press(crossterm::event::KeyCode::Char('r')),
+            key_press(crossterm::event::KeyCode::Char('q')),
+        ]);
+        let mut screen = MockScreen::default();
+        let mut markdown = "alpha beta".to_string();
+
+        let result = super::run_interactive_pager_with(
+            &terminal,
+            &mut events,
+            &mut screen,
+            &mut markdown,
+            None,
+            true,
+            "stdin",
+            None,
+        );
+        assert!(result.is_ok());
+        assert!(
+            screen
+                .statuses
+                .iter()
+                .flatten()
+                .any(|s| s == "Reload unavailable for stdin"),
+            "expected reload-unavailable status to be drawn"
+        );
     }
 }
 
