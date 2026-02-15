@@ -29,7 +29,7 @@ fn test_terminal_cleanup() {
 
     // Run the test binary - it should panic but exit cleanly (not abnormally)
     let result = Command::new("rustc")
-        .args(&[
+        .args([
             "--edition",
             "2021",
             "-L",

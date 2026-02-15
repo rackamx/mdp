@@ -190,8 +190,8 @@ mod tests {
     #[test]
     fn test_terminal_creation() {
         let result = Terminal::new();
-        if result.is_ok() {
-            let _terminal = result.expect("terminal should exist");
+        if let Ok(terminal) = result {
+            let _terminal = terminal;
         }
     }
 
@@ -278,7 +278,10 @@ mod tests {
     fn test_is_raw_mode_true_after_successful_creation() {
         let ops = MockTerminalOps::new();
         let terminal = Terminal::new_with_ops(ops).expect("terminal should be created");
-        assert!(terminal.is_raw_mode(), "expected raw mode flag after creation");
+        assert!(
+            terminal.is_raw_mode(),
+            "expected raw mode flag after creation"
+        );
     }
 
     #[test]

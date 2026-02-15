@@ -506,7 +506,11 @@ trait PagerScreen {
         status_message: Option<&str>,
         cache: &mut FrameCache,
     ) -> Result<(), io::Error>;
-    fn prompt_search(&mut self, pager: &Pager, source_label: &str) -> Result<Option<String>, io::Error>;
+    fn prompt_search(
+        &mut self,
+        pager: &Pager,
+        source_label: &str,
+    ) -> Result<Option<String>, io::Error>;
     fn draw_help(&mut self, help_lines: &[String]) -> Result<(), io::Error>;
     fn clear(&mut self) -> Result<(), io::Error>;
 }
@@ -524,7 +528,11 @@ impl PagerScreen for CrosstermScreen {
         draw_page(pager, source_label, status_message, cache)
     }
 
-    fn prompt_search(&mut self, pager: &Pager, source_label: &str) -> Result<Option<String>, io::Error> {
+    fn prompt_search(
+        &mut self,
+        pager: &Pager,
+        source_label: &str,
+    ) -> Result<Option<String>, io::Error> {
         prompt_search(pager, source_label)
     }
 
@@ -597,6 +605,7 @@ fn run_interactive_pager(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_interactive_pager_with<T, E, S>(
     terminal: &T,
     events: &mut E,
@@ -796,8 +805,8 @@ mod tests {
     };
     use mdp::pager::{Pager, PagerConfig};
     use std::collections::VecDeque;
-    use std::io;
     use std::fs;
+    use std::io;
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -900,18 +909,17 @@ mod tests {
 
     #[test]
     fn test_load_input_returns_usage_when_no_file_and_tty() {
-        let result = load_input(None, true, &|| Ok("stdin".to_string()), &|_| Ok("".to_string()));
+        let result = load_input(None, true, &|| Ok("stdin".to_string()), &|_| {
+            Ok("".to_string())
+        });
         assert!(matches!(result, Err(InputLoadError::Usage)));
     }
 
     #[test]
     fn test_load_input_propagates_file_read_error() {
-        let result = load_input(
-            Some("missing.md"),
-            true,
-            &|| Ok(String::new()),
-            &|_| Err(io::Error::new(io::ErrorKind::NotFound, "missing")),
-        );
+        let result = load_input(Some("missing.md"), true, &|| Ok(String::new()), &|_| {
+            Err(io::Error::new(io::ErrorKind::NotFound, "missing"))
+        });
         assert!(matches!(result, Err(InputLoadError::ReadFile(_))));
     }
 
@@ -1019,9 +1027,15 @@ mod tests {
     #[test]
     fn test_apply_navigation_action_dispatches_to_target() {
         let mut nav = MockPagerNav::new();
-        assert!(apply_navigation_action(&mut nav, PagerKeyAction::ScrollDown));
+        assert!(apply_navigation_action(
+            &mut nav,
+            PagerKeyAction::ScrollDown
+        ));
         assert!(apply_navigation_action(&mut nav, PagerKeyAction::GoToEnd));
-        assert!(apply_navigation_action(&mut nav, PagerKeyAction::SearchPrevious));
+        assert!(apply_navigation_action(
+            &mut nav,
+            PagerKeyAction::SearchPrevious
+        ));
         assert!(!apply_navigation_action(&mut nav, PagerKeyAction::ShowHelp));
         assert_eq!(
             nav.calls,
@@ -1140,16 +1154,28 @@ mod tests {
         );
         let _ = pager.search("beta");
 
-        assert!(apply_navigation_action(&mut pager, PagerKeyAction::ScrollDown));
-        assert!(apply_navigation_action(&mut pager, PagerKeyAction::ScrollUp));
-        assert!(apply_navigation_action(&mut pager, PagerKeyAction::PageDown));
+        assert!(apply_navigation_action(
+            &mut pager,
+            PagerKeyAction::ScrollDown
+        ));
+        assert!(apply_navigation_action(
+            &mut pager,
+            PagerKeyAction::ScrollUp
+        ));
+        assert!(apply_navigation_action(
+            &mut pager,
+            PagerKeyAction::PageDown
+        ));
         assert!(apply_navigation_action(&mut pager, PagerKeyAction::PageUp));
         assert!(apply_navigation_action(
             &mut pager,
             PagerKeyAction::GoToBeginning
         ));
         assert!(apply_navigation_action(&mut pager, PagerKeyAction::GoToEnd));
-        assert!(apply_navigation_action(&mut pager, PagerKeyAction::SearchNext));
+        assert!(apply_navigation_action(
+            &mut pager,
+            PagerKeyAction::SearchNext
+        ));
         assert!(apply_navigation_action(
             &mut pager,
             PagerKeyAction::SearchPrevious
@@ -1212,7 +1238,11 @@ mod tests {
     #[test]
     fn test_build_pager_ensures_at_least_one_line_for_empty_input() {
         let pager = build_pager("", 10, 80, 0, None, true);
-        assert_eq!(pager.total_lines(), 1, "pager should contain one empty line");
+        assert_eq!(
+            pager.total_lines(),
+            1,
+            "pager should contain one empty line"
+        );
         assert_eq!(pager.visible_lines(), vec![String::new()]);
     }
 
@@ -1651,7 +1681,10 @@ mod tests {
         .expect_err("ctrl-c should interrupt loop");
 
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
-        assert!(!screen.cleared, "should not clear screen on interrupted error");
+        assert!(
+            !screen.cleared,
+            "should not clear screen on interrupted error"
+        );
     }
 
     #[test]
@@ -1842,9 +1875,8 @@ mod tests {
         let terminal = MockTerminal {
             size: mdp::terminal::Size { rows: 8, cols: 40 },
         };
-        let mut events = MockEventSource::with_events(vec![
-            key_press(crossterm::event::KeyCode::Char('h')),
-        ]);
+        let mut events =
+            MockEventSource::with_events(vec![key_press(crossterm::event::KeyCode::Char('h'))]);
         let mut screen = MockScreen {
             help_error: Some(io::ErrorKind::Other),
             ..Default::default()
@@ -1870,9 +1902,8 @@ mod tests {
         let terminal = MockTerminal {
             size: mdp::terminal::Size { rows: 8, cols: 40 },
         };
-        let mut events = MockEventSource::with_events(vec![
-            key_press(crossterm::event::KeyCode::Char('/')),
-        ]);
+        let mut events =
+            MockEventSource::with_events(vec![key_press(crossterm::event::KeyCode::Char('/'))]);
         let mut screen = MockScreen {
             prompt_error: Some(io::ErrorKind::ConnectionReset),
             ..Default::default()
@@ -1898,9 +1929,8 @@ mod tests {
         let terminal = MockTerminal {
             size: mdp::terminal::Size { rows: 8, cols: 40 },
         };
-        let mut events = MockEventSource::with_events(vec![
-            key_press(crossterm::event::KeyCode::Char('q')),
-        ]);
+        let mut events =
+            MockEventSource::with_events(vec![key_press(crossterm::event::KeyCode::Char('q'))]);
         let mut screen = MockScreen {
             clear_error: Some(io::ErrorKind::BrokenPipe),
             ..Default::default()
@@ -1935,7 +1965,9 @@ struct CrosstermFrameWriter {
 
 impl CrosstermFrameWriter {
     fn new() -> Self {
-        Self { stdout: io::stdout() }
+        Self {
+            stdout: io::stdout(),
+        }
     }
 }
 
@@ -2011,9 +2043,9 @@ fn draw_page(
     status_message: Option<&str>,
     cache: &mut FrameCache,
 ) -> Result<(), io::Error> {
-        let mut writer = CrosstermFrameWriter::new();
-        draw_page_with_writer(pager, source_label, status_message, cache, &mut writer)
-    }
+    let mut writer = CrosstermFrameWriter::new();
+    draw_page_with_writer(pager, source_label, status_message, cache, &mut writer)
+}
 
 fn build_footer_line(pager: &Pager, source_label: &str, status_message: Option<&str>) -> String {
     let mut footer = if let Some(indicator) = pager.progress_indicator() {

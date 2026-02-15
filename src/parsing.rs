@@ -45,7 +45,7 @@ pub enum Event {
     },
     /// Task list checkbox marker (`- [ ]` or `- [x]`)
     TaskListMarker(bool),
-    /// Footnote reference (e.g. [^1])
+    /// Footnote reference (for example, `[^1]` in markdown source)
     FootnoteReference(String),
     /// Unordered list item marker from source ('-', '*', '+')
     ListItemMarker(char),
@@ -72,7 +72,10 @@ pub enum Block {
     /// Block quote
     BlockQuote,
     /// Code block
-    CodeBlock { info: Option<String>, indented: bool },
+    CodeBlock {
+        info: Option<String>,
+        indented: bool,
+    },
     /// Unordered list
     List { start: Option<u64> },
     /// List item
@@ -206,7 +209,8 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                     TagEnd::Link => {
                         // End of a link - emit the Link event with text and URL
                         if let Some((true, false, url, start_offset)) = link_state.take() {
-                            let mut source = extract_source_from_range(markdown, start_offset, range.end);
+                            let mut source =
+                                extract_source_from_range(markdown, start_offset, range.end);
                             if is_escaped_image_like_link(markdown, start_offset)
                                 && source.starts_with('[')
                             {
@@ -228,7 +232,8 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                     TagEnd::Image => {
                         // End of an image - emit the Image event with alt and URL
                         if let Some((false, true, url, start_offset)) = link_state.take() {
-                            let source = extract_source_from_range(markdown, start_offset, range.end);
+                            let source =
+                                extract_source_from_range(markdown, start_offset, range.end);
                             out.push(Event::Image {
                                 alt: link_text.clone(),
                                 url,
@@ -407,15 +412,15 @@ fn should_emit_inter_block_blank_lines_before_event(
         MdEvent::Start(Tag::Paragraph) => paragraph_starts_at_line_indent_only(markdown, offset),
         MdEvent::Start(
             Tag::Heading { .. }
-                | Tag::BlockQuote(_)
-                | Tag::CodeBlock(_)
-                | Tag::List(_)
-                | Tag::Table(_)
-                | Tag::FootnoteDefinition(_)
-                | Tag::DefinitionList
-                | Tag::DefinitionListTitle
-                | Tag::DefinitionListDefinition
-                | Tag::HtmlBlock,
+            | Tag::BlockQuote(_)
+            | Tag::CodeBlock(_)
+            | Tag::List(_)
+            | Tag::Table(_)
+            | Tag::FootnoteDefinition(_)
+            | Tag::DefinitionList
+            | Tag::DefinitionListTitle
+            | Tag::DefinitionListDefinition
+            | Tag::HtmlBlock,
         ) => true,
         _ => false,
     }
