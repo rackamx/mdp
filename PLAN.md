@@ -147,6 +147,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_indented_code_block()` - render indented code (4 spaces)
   - `test_render_inline_code()` - render `\`code\``, verify backticks preserved
 
+**Status**: DONE
+
 ---
 
 ### T09 - Block Quote Rendering

@@ -23,6 +23,8 @@ pub enum Event {
     EmphasisStart,
     /// End of emphasis (italics)
     EmphasisEnd,
+    /// Inline code (backtick-enclosed)
+    InlineCode(String),
 }
 
 /// Block elements in markdown
@@ -67,7 +69,7 @@ fn convert_event(event: MdEvent) -> Event {
         MdEvent::SoftBreak => Event::SoftBreak,
         MdEvent::HardBreak => Event::HardBreak,
         MdEvent::Rule => Event::Rule,
-        MdEvent::Code(_) => Event::Text(String::new()), // Simplified: ignore code
+        MdEvent::Code(code) => Event::InlineCode(code.to_string()),
         MdEvent::InlineMath(_) => Event::Text(String::new()), // Simplified
         MdEvent::DisplayMath(_) => Event::Text(String::new()), // Simplified
         MdEvent::Html(_) => Event::Text(String::new()), // Simplified: ignore HTML

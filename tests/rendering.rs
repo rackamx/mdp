@@ -264,3 +264,63 @@ fn test_render_heading_bold() {
     assert!(output.contains("\x1b[0m"),
             "Expected bold off code \\x1b[0m in output, got: {:?}", output);
 }
+
+/// Test fenced code block rendering
+#[test]
+fn test_render_fenced_code_block() {
+    let markdown = "```rust\nlet x = 42;\n```";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the code
+    assert!(output.contains("let x = 42;"),
+            "Expected 'let x = 42;' in output, got: {:?}", output);
+    // Should have fence markers (backticks)
+    assert!(output.contains("```"),
+            "Expected fence markers ``` in output, got: {:?}", output);
+    // Should use monospace indication (ANSI codes for faint/dim or similar)
+    // Using faint (code 2) for code blocks
+    assert!(output.contains("\x1b[2m"),
+            "Expected faint code \\x1b[2m in output, got: {:?}", output);
+}
+
+/// Test indented code block rendering (4 spaces)
+#[test]
+fn test_render_indented_code_block() {
+    let markdown = "    let y = 100;\n    let z = 200;";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the code
+    assert!(output.contains("let y = 100;"),
+            "Expected 'let y = 100;' in output, got: {:?}", output);
+    assert!(output.contains("let z = 200;"),
+            "Expected 'let z = 200;' in output, got: {:?}", output);
+    // Should use monospace indication
+    assert!(output.contains("\x1b[2m"),
+            "Expected faint code \\x1b[2m in output, got: {:?}", output);
+}
+
+/// Test inline code rendering with backticks
+#[test]
+fn test_render_inline_code() {
+    let markdown = "Use `inline code` here";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the inline code text
+    assert!(output.contains("inline code"),
+            "Expected 'inline code' in output, got: {:?}", output);
+    // Should preserve backticks
+    assert!(output.contains("`"),
+            "Expected backticks in output, got: {:?}", output);
+    // Should use monospace for inline code (ANSI faint)
+    assert!(output.contains("\x1b[2m"),
+            "Expected faint code \\x1b[2m in output, got: {:?}", output);
+}

@@ -14,6 +14,10 @@ pub struct Renderer {
     heading_level: u8,
     /// Heading text collected so far
     heading_text: String,
+    /// Whether we're currently in a code block
+    in_code_block: bool,
+    /// Code block info string (e.g., language)
+    code_block_info: Option<String>,
 }
 
 impl Renderer {
@@ -26,6 +30,8 @@ impl Renderer {
             current_line: String::new(),
             heading_level: 0,
             heading_text: String::new(),
+            in_code_block: false,
+            code_block_info: None,
         }
     }
 
@@ -37,6 +43,8 @@ impl Renderer {
         self.cursor_col = 0;
         self.heading_level = 0;
         self.heading_text.clear();
+        self.in_code_block = false;
+        self.code_block_info = None;
 
         for event in events {
             self.process_event(event);
@@ -63,6 +71,7 @@ impl Renderer {
             Event::StrongEnd => self.render_bold_end(),
             Event::EmphasisStart => self.render_italics_start(),
             Event::EmphasisEnd => self.render_italics_end(),
+            Event::InlineCode(code) => self.render_inline_code(code),
         }
     }
 
@@ -121,6 +130,17 @@ impl Renderer {
         self.current_line.push_str("\x1b[0m");
     }
 
+    /// Render inline code with backticks and monospace indication
+    fn render_inline_code(&mut self, code: &str) {
+        // Add backticks and use faint (dim) for monospace indication
+        self.current_line.push('`');
+        self.current_line.push_str("\x1b[2m");  // Faint for monospace
+        self.current_line.push_str(code);
+        self.current_line.push_str("\x1b[0m");  // Reset
+        self.current_line.push('`');
+        self.cursor_col += 2 + code.len() + 2 + 1;  // ` + ANSI + code + ANSI + `
+    }
+
     /// Render a hard line break
     fn render_newline(&mut self) {
         // Flush current line
@@ -176,8 +196,21 @@ impl Renderer {
             crate::parsing::Block::BlockQuote => {
                 // Block quote handling
             }
-            crate::parsing::Block::CodeBlock { info: _ } => {
-                // Code block handling
+            crate::parsing::Block::CodeBlock { info } => {
+                // Track code block state
+                self.in_code_block = true;
+                self.code_block_info = info.clone();
+                // Add opening fence with info string if present
+                if let Some(ref lang) = info {
+                    self.current_line.push_str("```");
+                    self.current_line.push_str(lang);
+                    self.cursor_col = 3 + lang.len();
+                } else {
+                    self.current_line.push_str("```");
+                    self.cursor_col = 3;
+                }
+                // Use faint for monospace indication
+                self.current_line.push_str("\x1b[2m");
             }
             crate::parsing::Block::List { start: _ } => {
                 // List handling
@@ -219,6 +252,21 @@ impl Renderer {
 
                 // Reset heading state
                 self.heading_level = 0;
+            }
+            crate::parsing::Block::CodeBlock { info: _ } => {
+                // End monospace
+                self.current_line.push_str("\x1b[0m");
+                // Add closing fence
+                self.current_line.push_str("```");
+                // Flush the line
+                if !self.current_line.is_empty() {
+                    self.lines.push(self.current_line.clone());
+                    self.current_line.clear();
+                    self.cursor_col = 0;
+                }
+                // Reset code block state
+                self.in_code_block = false;
+                self.code_block_info = None;
             }
             _ => {
                 // For other blocks, just flush current line
