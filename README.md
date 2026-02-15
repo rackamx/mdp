@@ -5,8 +5,10 @@
 It renders Markdown to terminal-friendly text and gives you `less`-style navigation with search and reload.
 
 ![Rust](https://img.shields.io/badge/language-Rust-000000?logo=rust)
-![License](https://img.shields.io/badge/license-MIT-blue)
+![License](https://img.shields.io/badge/license-Unlicense-blue)
 ![Terminal](https://img.shields.io/badge/interface-terminal-success)
+[![CI](https://github.com/rackamx/mdp/actions/workflows/ci.yml/badge.svg)](https://github.com/rackamx/mdp/actions/workflows/ci.yml)
+[![Coverage](https://github.com/rackamx/mdp/actions/workflows/coverage.yml/badge.svg)](https://github.com/rackamx/mdp/actions/workflows/coverage.yml)
 
 ## Philosophy
 
