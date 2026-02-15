@@ -69,8 +69,12 @@ impl Renderer {
         self.list_item_number = 0;
         self.list_depth = 0;
 
-        for event in events {
-            self.process_event(event);
+        // Combine consecutive Text events to properly handle escape sequences
+        // like \*text\* which pulldown_cmark splits into multiple Text events
+        let combined_events = Self::combine_text_events(events);
+
+        for event in combined_events {
+            self.process_event(&event);
         }
 
         // Flush any remaining content in the current line
@@ -79,6 +83,40 @@ impl Renderer {
         }
 
         self.lines.join("\n")
+    }
+
+    /// Combine consecutive Text events into a single Text event.
+    /// This is needed because pulldown_cmark can emit multiple Text events
+    /// for escape sequences like \*text\* (producing "*text" and "*" separately).
+    fn combine_text_events(events: &[Event]) -> Vec<Event> {
+        let mut result = Vec::new();
+        let mut pending_text: Option<String> = None;
+
+        for event in events {
+            match event {
+                Event::Text(text) => {
+                    if let Some(ref mut pending) = pending_text {
+                        pending.push_str(text);
+                    } else {
+                        pending_text = Some(text.clone());
+                    }
+                }
+                _ => {
+                    // Flush pending text if any
+                    if let Some(text) = pending_text.take() {
+                        result.push(Event::Text(text));
+                    }
+                    result.push(event.clone());
+                }
+            }
+        }
+
+        // Flush any remaining pending text
+        if let Some(text) = pending_text {
+            result.push(Event::Text(text));
+        }
+
+        result
     }
 
     /// Process a single markdown event

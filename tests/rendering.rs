@@ -581,3 +581,65 @@ fn test_render_email_auto_link() {
     assert!(output.contains("user@example.com (user@example.com)"),
             "Expected 'user@example.com (user@example.com)' in output, got: {:?}", output);
 }
+
+/// Test escape sequence: \* should render as *
+#[test]
+fn test_render_escape_asterisk() {
+    let markdown = "\\*";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the literal asterisk (not interpreted as emphasis)
+    assert!(output.contains("*"),
+            "Expected '*' in output, got: {:?}", output);
+    // Should NOT contain emphasis formatting codes (since it's escaped)
+    assert!(!output.contains("\x1b[3m"),
+            "Expected no italics code in output for escaped asterisk, got: {:?}", output);
+}
+
+/// Test escape sequence: \[ should render as [
+#[test]
+fn test_render_escape_bracket() {
+    let markdown = "\\[";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the literal bracket
+    assert!(output.contains("["),
+            "Expected '[' in output, got: {:?}", output);
+}
+
+/// Test escape sequence: \\ should render as \
+#[test]
+fn test_render_escape_backslash() {
+    let markdown = "\\\\";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the literal backslash
+    assert!(output.contains("\\"),
+            "Expected '\\' in output, got: {:?}", output);
+}
+
+/// Test multiple escape sequences: \*text\* should render as *text*
+#[test]
+fn test_render_multiple_escapes() {
+    let markdown = "\\*text\\*";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Should contain the literal text with asterisks
+    assert!(output.contains("*text*"),
+            "Expected '*text*' in output, got: {:?}", output);
+    // Should NOT contain emphasis formatting codes
+    assert!(!output.contains("\x1b[3m"),
+            "Expected no italics code in output for escaped asterisks, got: {:?}", output);
+}

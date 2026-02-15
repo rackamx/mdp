@@ -218,6 +218,8 @@ Build a Rust-based markdown pager similar to `less` that interprets and renders 
   - `test_render_escape_backslash()` - render `\\`, verify `\`
   - `test_render_multiple_escapes()` - render `\*text\*`, verify `*text*`
 
+**Status**: DONE
+
 ---
 
 ### T12 - Basic Paging
