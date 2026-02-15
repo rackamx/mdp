@@ -9,6 +9,8 @@ It renders Markdown to terminal-friendly text and gives you `less`-style navigat
 ![Terminal](https://img.shields.io/badge/interface-terminal-success)
 [![CI](https://github.com/rackamx/mdp/actions/workflows/ci.yml/badge.svg)](https://github.com/rackamx/mdp/actions/workflows/ci.yml)
 [![Coverage](https://github.com/rackamx/mdp/actions/workflows/coverage.yml/badge.svg)](https://github.com/rackamx/mdp/actions/workflows/coverage.yml)
+[![Sanitizers](https://github.com/rackamx/mdp/actions/workflows/sanitizers.yml/badge.svg)](https://github.com/rackamx/mdp/actions/workflows/sanitizers.yml)
+[![Security](https://github.com/rackamx/mdp/actions/workflows/security.yml/badge.svg)](https://github.com/rackamx/mdp/actions/workflows/security.yml)
 
 ## Philosophy
 
