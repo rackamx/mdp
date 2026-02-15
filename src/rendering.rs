@@ -20,8 +20,16 @@ pub struct Renderer {
     strikethrough_fallback: bool,
     /// Whether we're currently inside strikethrough span
     in_strikethrough: bool,
+    /// Nested bold depth
+    bold_depth: usize,
+    /// Nested italics depth
+    italics_depth: usize,
+    /// Nested strikethrough depth
+    strikethrough_depth: usize,
     /// Code block info string (e.g., language)
     code_block_info: Option<String>,
+    /// Extra indentation to apply to code content lines (e.g., indented code blocks)
+    code_block_content_indent: usize,
     /// Whether we're currently in a block quote
     in_block_quote: bool,
     /// Current block quote nesting depth
@@ -40,8 +48,16 @@ pub struct Renderer {
     list_depth: usize,
     /// Marker for the next unordered list item ('-', '*', '+')
     pending_unordered_list_marker: Option<char>,
+    /// Number marker for the next ordered list item (e.g. `3.`)
+    pending_ordered_list_number: Option<u64>,
+    /// Whether to preserve a source blank line before the next list item
+    pending_list_item_blank_before: bool,
+    /// Number of source blank lines to insert before the next block
+    pending_interblock_blank_lines: usize,
     /// Display width used to indent wrapped lines within the current list item
     list_item_continuation_indent: usize,
+    /// Number of paragraph starts seen in current list item
+    list_item_paragraph_count: usize,
     /// Whether we're currently inside a table
     in_table: bool,
     /// Current table alignments
@@ -65,19 +81,19 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    fn needs_space_before_token(token: &str) -> bool {
+    fn needs_space_before_token(token: &str, prev_visible_char: Option<char>) -> bool {
         // Punctuation should "stick" to the previous token.
-        !matches!(
-            token.chars().next(),
+        match token.chars().next() {
             Some(':')
-                | Some(';')
-                | Some(',')
-                | Some('.')
-                | Some(')')
-                | Some(']')
-                | Some('}')
-                | Some('%')
-        )
+            | Some(';')
+            | Some(',')
+            | Some('.')
+            | Some(')')
+            | Some(']')
+            | Some('}')
+            | Some('%') => !prev_visible_char.map(|c| c.is_alphanumeric()).unwrap_or(false),
+            _ => true,
+        }
     }
 
     fn maybe_insert_space_before_inline(&mut self) {
@@ -89,6 +105,7 @@ impl Renderer {
             || self.current_line.ends_with('[')
             || self.current_line.ends_with('{')
             || self.current_line.ends_with('/')
+            || self.current_line.ends_with('!')
         {
             return;
         }
@@ -145,11 +162,18 @@ impl Renderer {
         if ch == '\u{00AD}' || ch == '\u{200B}' {
             return 0;
         }
+        let c = ch as u32;
+        if (0x0300..=0x036F).contains(&c)
+            || (0x1AB0..=0x1AFF).contains(&c)
+            || (0x1DC0..=0x1DFF).contains(&c)
+            || (0x20D0..=0x20FF).contains(&c)
+            || (0xFE20..=0xFE2F).contains(&c)
+        {
+            return 0;
+        }
         if ch.is_ascii() {
             return 1;
         }
-
-        let c = ch as u32;
         if (0x1100..=0x115F).contains(&c)
             || (0x2329..=0x232A).contains(&c)
             || (0x2E80..=0xA4CF).contains(&c)
@@ -180,7 +204,11 @@ impl Renderer {
             in_code_block: false,
             strikethrough_fallback: true,
             in_strikethrough: false,
+            bold_depth: 0,
+            italics_depth: 0,
+            strikethrough_depth: 0,
             code_block_info: None,
+            code_block_content_indent: 0,
             in_block_quote: false,
             block_quote_depth: 0,
             block_quote_prefix: '│',
@@ -190,7 +218,11 @@ impl Renderer {
             list_stack: Vec::new(),
             list_depth: 0,
             pending_unordered_list_marker: None,
+            pending_ordered_list_number: None,
+            pending_list_item_blank_before: false,
+            pending_interblock_blank_lines: 0,
             list_item_continuation_indent: 0,
+            list_item_paragraph_count: 0,
             in_table: false,
             table_alignments: Vec::new(),
             table_rows: Vec::new(),
@@ -213,7 +245,11 @@ impl Renderer {
         self.heading_text.clear();
         self.in_code_block = false;
         self.in_strikethrough = false;
+        self.bold_depth = 0;
+        self.italics_depth = 0;
+        self.strikethrough_depth = 0;
         self.code_block_info = None;
+        self.code_block_content_indent = 0;
         self.in_block_quote = false;
         self.block_quote_depth = 0;
         self.in_list = false;
@@ -222,7 +258,11 @@ impl Renderer {
         self.list_stack.clear();
         self.list_depth = 0;
         self.pending_unordered_list_marker = None;
+        self.pending_ordered_list_number = None;
+        self.pending_list_item_blank_before = false;
+        self.pending_interblock_blank_lines = 0;
         self.list_item_continuation_indent = 0;
+        self.list_item_paragraph_count = 0;
         self.in_table = false;
         self.table_alignments.clear();
         self.table_rows.clear();
@@ -315,12 +355,27 @@ impl Renderer {
             Event::StrikethroughEnd => self.render_strikethrough_end(),
             Event::InlineCode(code) => self.render_inline_code(code),
             Event::RawHtml(html) => self.render_raw_html(html),
-            Event::Link { text, url } => self.render_link(text, url),
-            Event::Image { alt, url: _ } => self.render_image(alt),
+            Event::Link { text, url, source } => self.render_link(text, url, source),
+            Event::Image { alt, url, source } => self.render_image(alt, url, source),
             Event::TaskListMarker(checked) => self.render_task_marker(*checked),
             Event::FootnoteReference(label) => self.render_footnote_reference(label),
             Event::ListItemMarker(marker) => self.pending_unordered_list_marker = Some(*marker),
+            Event::OrderedListItemMarker(number) => self.pending_ordered_list_number = Some(*number),
+            Event::ListItemPrecededByBlankLine => self.pending_list_item_blank_before = true,
+            Event::InterBlockBlankLines(count) => self.render_interblock_blank_lines(*count),
         }
+    }
+
+    fn render_interblock_blank_lines(&mut self, count: usize) {
+        if count == 0 {
+            return;
+        }
+        if !self.current_line.is_empty() {
+            self.lines.push(self.current_line.clone());
+            self.current_line.clear();
+            self.cursor_col = 0;
+        }
+        self.pending_interblock_blank_lines = count;
     }
 
     /// Render text content with word wrapping
@@ -333,6 +388,16 @@ impl Renderer {
         let mut processed = Self::smart_punctuation(text);
         if self.strikethrough_fallback && self.in_strikethrough {
             processed = Self::apply_strikethrough_fallback(&processed);
+        }
+
+        if let Some(rendered_ref_def) = Self::render_reference_definition_with_underlined_url(&processed) {
+            if self.in_table_cell {
+                self.current_table_cell.push_str(&rendered_ref_def);
+            } else {
+                self.current_line.push_str(&rendered_ref_def);
+                self.cursor_col += Self::display_width(&Self::strip_ansi(&rendered_ref_def));
+            }
+            return;
         }
 
         if self.in_table_cell {
@@ -363,10 +428,12 @@ impl Renderer {
             } else {
                 true
             };
+            let prev_visible_char = Self::last_visible_char(&self.current_line);
+            let token_needs_space = Self::needs_space_before_token(word, prev_visible_char);
             let needs_leading_space = self.cursor_col > 0
                 && should_have_space_before
                 && !Self::ends_with_visible_space(&self.current_line)
-                && Self::needs_space_before_token(word);
+                && token_needs_space;
 
             // Check if we need to wrap to a new line
             if self.cursor_col > 0
@@ -380,7 +447,7 @@ impl Renderer {
             if self.cursor_col > 0
                 && should_have_space_before
                 && !Self::ends_with_visible_space(&self.current_line)
-                && Self::needs_space_before_token(word)
+                && token_needs_space
                 && !Self::ends_with_open_html_tag(&self.current_line)
             {
                 self.current_line.push(' ');
@@ -429,6 +496,12 @@ impl Renderer {
             return;
         }
 
+        // Preserve source soft-break line boundaries inside list items.
+        if self.in_list && self.list_item_continuation_indent > 0 {
+            self.render_newline();
+            return;
+        }
+
         // Within a block quote, soft breaks become new lines with prefix
         if self.in_block_quote {
             // Flush current line
@@ -446,41 +519,59 @@ impl Renderer {
 
     /// Render bold text start (ANSI bold on)
     fn render_bold_start(&mut self) {
-        self.current_line.push_str("\x1b[1m");
-        // Track escape sequence length for cursor position
-        // \x1b[1m is 4 characters but doesn't count toward visible width
+        if self.bold_depth == 0 {
+            self.current_line.push_str("\x1b[1m");
+        }
+        self.bold_depth += 1;
     }
 
     /// Render bold text end (ANSI bold off)
     fn render_bold_end(&mut self) {
-        self.current_line.push_str("\x1b[0m");
+        if self.bold_depth > 0 {
+            self.bold_depth -= 1;
+        }
+        if self.bold_depth == 0 {
+            self.current_line.push_str("\x1b[22m");
+        }
     }
 
     /// Render italics text start (ANSI italics on)
     fn render_italics_start(&mut self) {
-        self.current_line.push_str("\x1b[3m");
+        if self.italics_depth == 0 {
+            self.current_line.push_str("\x1b[3m");
+        }
+        self.italics_depth += 1;
     }
 
     /// Render italics text end (ANSI italics off)
     fn render_italics_end(&mut self) {
-        self.current_line.push_str("\x1b[0m");
+        if self.italics_depth > 0 {
+            self.italics_depth -= 1;
+        }
+        if self.italics_depth == 0 {
+            self.current_line.push_str("\x1b[23m");
+        }
     }
 
     /// Render strikethrough text start (ANSI strikethrough on)
     fn render_strikethrough_start(&mut self) {
+        self.strikethrough_depth += 1;
         if self.strikethrough_fallback {
             self.in_strikethrough = true;
-        } else {
+        } else if self.strikethrough_depth == 1 {
             self.current_line.push_str("\x1b[9m");
         }
     }
 
     /// Render strikethrough text end (ANSI reset)
     fn render_strikethrough_end(&mut self) {
+        if self.strikethrough_depth > 0 {
+            self.strikethrough_depth -= 1;
+        }
         if self.strikethrough_fallback {
-            self.in_strikethrough = false;
-        } else {
-            self.current_line.push_str("\x1b[0m");
+            self.in_strikethrough = self.strikethrough_depth > 0;
+        } else if self.strikethrough_depth == 0 {
+            self.current_line.push_str("\x1b[29m");
         }
     }
 
@@ -492,10 +583,19 @@ impl Renderer {
             code.to_string()
         };
         let delim = Self::inline_code_delimiter(code);
+        let needs_padding = display_code.starts_with('`')
+            || display_code.ends_with('`')
+            || display_code.starts_with(' ')
+            || display_code.ends_with(' ');
+        let serialized_code = if needs_padding {
+            format!(" {display_code} ")
+        } else {
+            display_code.clone()
+        };
 
         if self.in_table_cell {
             self.current_table_cell.push_str(&delim);
-            self.current_table_cell.push_str(&display_code);
+            self.current_table_cell.push_str(&serialized_code);
             self.current_table_cell.push_str(&delim);
             return;
         }
@@ -505,10 +605,10 @@ impl Renderer {
         // Add backticks and use faint (dim) for monospace indication
         self.current_line.push_str(&delim);
         self.current_line.push_str("\x1b[2m"); // Faint for monospace
-        self.current_line.push_str(&display_code);
+        self.current_line.push_str(&serialized_code);
         self.current_line.push_str("\x1b[0m"); // Reset
         self.current_line.push_str(&delim);
-        self.cursor_col += (2 * delim.len()) + Self::display_width(&display_code);
+        self.cursor_col += (2 * delim.len()) + Self::display_width(&serialized_code);
     }
 
     fn render_raw_html(&mut self, html: &str) {
@@ -521,9 +621,16 @@ impl Renderer {
             self.maybe_insert_space_before_inline();
         }
 
-        let mut segments = html.split('\n').peekable();
+        let is_comment = Self::is_html_comment(html);
+        let mut segments = html.split_terminator('\n').peekable();
         while let Some(segment) = segments.next() {
+            if is_comment {
+                self.current_line.push_str("\x1b[2m");
+            }
             self.current_line.push_str(segment);
+            if is_comment {
+                self.current_line.push_str("\x1b[22m");
+            }
             self.cursor_col += Self::display_width(segment);
             if segments.peek().is_some() {
                 self.render_newline();
@@ -532,32 +639,125 @@ impl Renderer {
     }
 
     /// Render a link as "text (url)"
-    fn render_link(&mut self, text: &str, url: &str) {
+    fn render_link(&mut self, text: &str, url: &str, source: &str) {
+        if !source.is_empty() {
+            let rendered = if source.starts_with('[') && self.current_line.ends_with('!') {
+                // Escaped image-like text is parsed as literal '!' plus a link.
+                // Keep original markdown-like form without underlining destination.
+                source.to_string()
+            } else {
+                Self::render_link_source_with_underlined_url(source, url)
+            };
+            if self.in_table_cell {
+                self.current_table_cell.push_str(&rendered);
+                return;
+            }
+
+            self.maybe_insert_space_before_inline();
+            self.current_line.push_str(&rendered);
+            self.cursor_col += Self::display_width(&Self::strip_ansi(&rendered));
+            return;
+        }
+
+        let rendered_url = Self::underline_with_ansi(url);
         if self.in_table_cell {
-            self.current_table_cell.push_str(text);
-            if !url.is_empty() {
-                self.current_table_cell.push_str(" (");
+            if !url.is_empty() && text == url {
+                self.current_table_cell.push('<');
                 self.current_table_cell.push_str(url);
-                self.current_table_cell.push(')');
+                self.current_table_cell.push('>');
+            } else {
+                self.current_table_cell.push('[');
+                self.current_table_cell.push_str(text);
+                self.current_table_cell.push(']');
+                if !url.is_empty() {
+                    self.current_table_cell.push('(');
+                    self.current_table_cell.push_str(url);
+                    self.current_table_cell.push(')');
+                }
             }
             return;
         }
 
         self.maybe_insert_space_before_inline();
 
-        // Add the link text
+        // Autolink form: don't duplicate "url (url)".
+        if !url.is_empty() && text == url {
+            self.current_line.push('<');
+            self.current_line.push_str(&rendered_url);
+            self.current_line.push('>');
+            self.cursor_col += 2 + Self::display_width(url);
+            return;
+        }
+
+        // Add markdown-like link text form.
+        self.current_line.push('[');
+        self.cursor_col += 1;
         self.render_text(text);
-        // Add space and URL in parentheses
+        self.current_line.push(']');
+        self.cursor_col += 1;
+
+        // Add URL in markdown parentheses.
         if !url.is_empty() {
-            self.current_line.push_str(" (");
-            self.current_line.push_str(url);
+            self.current_line.push('(');
+            self.current_line.push_str(&rendered_url);
             self.current_line.push(')');
-            self.cursor_col += 3 + Self::display_width(url); // " (" + url + ")"
+            self.cursor_col += 2 + Self::display_width(url); // "(" + url + ")"
         }
     }
 
-    /// Render an image by showing just the alt text in brackets
-    fn render_image(&mut self, alt: &str) {
+    fn render_link_source_with_underlined_url(source: &str, url: &str) -> String {
+        if source.starts_with("![") {
+            return source.to_string();
+        }
+
+        if source.starts_with('<') && source.ends_with('>') && !url.is_empty() {
+            return format!("<{}>", Self::underline_with_ansi(url));
+        }
+
+        if let Some(open) = source.find("](") {
+            let close = source.rfind(')').unwrap_or(source.len());
+            if close > open + 2 {
+                let inside = &source[open + 2..close];
+                let mut split_at = inside.len();
+                let mut in_quote = false;
+                for (i, ch) in inside.char_indices() {
+                    if ch == '"' {
+                        in_quote = !in_quote;
+                    }
+                    if !in_quote && ch.is_whitespace() {
+                        split_at = i;
+                        break;
+                    }
+                }
+                let link_dest = &inside[..split_at];
+                if !link_dest.is_empty() {
+                    let mut out = String::new();
+                    out.push_str(&source[..open + 2]);
+                    out.push_str(&Self::underline_with_ansi(link_dest));
+                    out.push_str(&inside[split_at..]);
+                    out.push_str(&source[close..]);
+                    return out;
+                }
+            }
+        }
+
+        source.to_string()
+    }
+
+    /// Render an image preserving source markdown form when available.
+    fn render_image(&mut self, alt: &str, _url: &str, source: &str) {
+        if !source.is_empty() {
+            if self.in_table_cell {
+                self.current_table_cell.push_str(source);
+                return;
+            }
+
+            self.maybe_insert_space_before_inline();
+            self.current_line.push_str(source);
+            self.cursor_col += Self::display_width(source);
+            return;
+        }
+
         if self.in_table_cell {
             self.current_table_cell.push('[');
             self.current_table_cell.push_str(alt);
@@ -576,13 +776,13 @@ impl Renderer {
 
     /// Render a task list checkbox marker
     fn render_task_marker(&mut self, checked: bool) {
-        let marker = if checked { "[x] " } else { "[ ] " };
+        let marker = if checked { "[✔] " } else { "[ ] " };
         if self.in_table_cell {
             self.current_table_cell.push_str(marker);
             return;
         }
         self.current_line.push_str(marker);
-        self.cursor_col += marker.len();
+        self.cursor_col += Self::display_width(marker);
     }
 
     /// Render a footnote reference inline.
@@ -620,6 +820,14 @@ impl Renderer {
             self.current_line.push_str(&indent);
             self.cursor_col = self.list_item_continuation_indent;
         }
+        if self.in_code_block {
+            self.current_line.push_str("\x1b[2m");
+            if self.code_block_content_indent > 0 {
+                let indent = " ".repeat(self.code_block_content_indent);
+                self.current_line.push_str(&indent);
+                self.cursor_col += self.code_block_content_indent;
+            }
+        }
         if self.in_footnote_definition {
             self.current_line.push_str("\x1b[2m");
         }
@@ -633,13 +841,22 @@ impl Renderer {
             self.current_line.clear();
             self.cursor_col = 0;
         }
+        if !self.lines.is_empty() && !self.lines.last().is_some_and(String::is_empty) {
+            self.lines.push(String::new());
+        }
 
         let ch = match marker {
             '*' => '═',
             '_' => '┄',
             _ => '─',
         };
-        self.lines.push(ch.to_string().repeat(self.width.max(3)));
+        let rule_width = (self.width / 2).max(3);
+        let left_pad = self.width.saturating_sub(rule_width) / 2;
+        let mut line = String::new();
+        line.push_str(&" ".repeat(left_pad));
+        line.push_str(&ch.to_string().repeat(rule_width));
+        self.lines.push(line);
+        self.lines.push(String::new());
     }
 
     /// Handle the start of a block element
@@ -663,11 +880,18 @@ impl Renderer {
         }
 
         if matches!(block, crate::parsing::Block::Paragraph) && self.in_list {
+            if self.list_item_paragraph_count > 0
+                && !self.lines.is_empty()
+                && !self.lines.last().is_some_and(String::is_empty)
+            {
+                self.lines.push(String::new());
+            }
             if self.current_line.is_empty() && self.list_item_continuation_indent > 0 {
                 let indent = " ".repeat(self.list_item_continuation_indent);
                 self.current_line.push_str(&indent);
                 self.cursor_col = self.list_item_continuation_indent;
             }
+            self.list_item_paragraph_count += 1;
             return;
         }
 
@@ -714,12 +938,41 @@ impl Renderer {
             );
 
             // Add a blank line only for major block boundaries.
-            if wants_blank && !self.lines.is_empty() && !self.lines.last().unwrap().is_empty() {
-                if self.in_block_quote {
-                    self.lines
-                        .push(self.block_quote_prefix_string().trim_end().to_string());
+            if wants_blank && !self.lines.is_empty() {
+                let desired_blank_lines = if self.pending_interblock_blank_lines > 0 {
+                    self.pending_interblock_blank_lines
                 } else {
-                    self.lines.push(String::new());
+                    0
+                };
+                self.pending_interblock_blank_lines = 0;
+
+                if desired_blank_lines == 0 {
+                    // Keep consecutive headings compact when source has no blank line.
+                } else if self.in_block_quote {
+                    let trailing_quote_blank = self
+                        .lines
+                        .iter()
+                        .rev()
+                        .take_while(|line| Self::is_quote_prefix_only(line))
+                        .count();
+                    if trailing_quote_blank < desired_blank_lines {
+                        for _ in 0..(desired_blank_lines - trailing_quote_blank) {
+                            self.lines
+                                .push(self.block_quote_prefix_string().trim_end().to_string());
+                        }
+                    }
+                } else {
+                    let trailing_empty = self
+                        .lines
+                        .iter()
+                        .rev()
+                        .take_while(|line| line.is_empty())
+                        .count();
+                    if trailing_empty < desired_blank_lines {
+                        for _ in 0..(desired_blank_lines - trailing_empty) {
+                            self.lines.push(String::new());
+                        }
+                    }
                 }
             }
         }
@@ -788,11 +1041,17 @@ impl Renderer {
                 if self.in_block_quote && self.current_line.is_empty() {
                     self.push_block_quote_prefix();
                 }
-                // Track heading level and start bold
+                // Track heading level and start bold + underline
                 self.heading_level = *level;
                 self.heading_text.clear();
-                // Start bold for heading
+                // Start heading style
                 self.render_bold_start();
+                self.current_line.push_str("\x1b[4m");
+                // Keep Markdown heading markers visible.
+                let marker = "#".repeat(usize::from(*level));
+                self.current_line.push_str(&marker);
+                self.current_line.push(' ');
+                self.cursor_col += marker.chars().count() + 1;
             }
             crate::parsing::Block::Paragraph => {
                 // Start of paragraph - no special handling needed
@@ -802,7 +1061,7 @@ impl Renderer {
                 self.block_quote_depth += 1;
                 self.in_block_quote = true;
             }
-            crate::parsing::Block::CodeBlock { info } => {
+            crate::parsing::Block::CodeBlock { info, indented } => {
                 if self.in_list
                     && self.current_line.is_empty()
                     && self.list_item_continuation_indent > 0
@@ -817,17 +1076,26 @@ impl Renderer {
                 // Track code block state
                 self.in_code_block = true;
                 self.code_block_info = info.clone();
-                // Emit opening fence and start a new line for code content.
-                if let Some(ref lang) = info {
-                    self.current_line.push_str("```");
-                    self.current_line.push_str(lang);
+                self.code_block_content_indent = if *indented { 4 } else { 0 };
+                if *indented {
+                    // Indented code blocks should not be normalized to fenced form.
+                    self.current_line.push_str("\x1b[2m");
+                    if self.code_block_content_indent > 0 {
+                        let indent = " ".repeat(self.code_block_content_indent);
+                        self.current_line.push_str(&indent);
+                        self.cursor_col += self.code_block_content_indent;
+                    }
                 } else {
-                    self.current_line.push_str("```");
+                    // Emit opening fence and start a new line for code content.
+                    if let Some(ref lang) = info {
+                        self.current_line.push_str("```");
+                        self.current_line.push_str(lang);
+                    } else {
+                        self.current_line.push_str("```");
+                    }
+                    self.cursor_col = Self::visible_display_width_without_ansi(&self.current_line);
+                    self.render_newline();
                 }
-                self.cursor_col = Self::visible_display_width_without_ansi(&self.current_line);
-                self.render_newline();
-                // Use faint for code content lines.
-                self.current_line.push_str("\x1b[2m");
             }
             crate::parsing::Block::List { start } => {
                 let is_ordered = start.is_some();
@@ -839,6 +1107,18 @@ impl Renderer {
                 self.list_item_number = next_number;
             }
             crate::parsing::Block::ListItem => {
+                if self.pending_list_item_blank_before {
+                    if !self.lines.is_empty() && !self.lines.last().is_some_and(String::is_empty) {
+                        if self.in_block_quote {
+                            self.lines
+                                .push(self.block_quote_prefix_string().trim_end().to_string());
+                        } else {
+                            self.lines.push(String::new());
+                        }
+                    }
+                    self.pending_list_item_blank_before = false;
+                }
+                self.list_item_paragraph_count = 0;
                 if self.in_block_quote && self.current_line.is_empty() {
                     self.push_block_quote_prefix();
                 }
@@ -851,8 +1131,9 @@ impl Renderer {
                 let marker = if let Some((ordered, next_number)) = self.list_stack.last_mut() {
                     self.list_is_ordered = *ordered;
                     if *ordered {
-                        let marker = format!("{}. ", *next_number);
-                        *next_number += 1;
+                        let display_number = self.pending_ordered_list_number.take().unwrap_or(*next_number);
+                        let marker = format!("{display_number}. ");
+                        *next_number = display_number.saturating_add(1);
                         self.list_item_number = *next_number;
                         marker
                     } else {
@@ -863,8 +1144,12 @@ impl Renderer {
                         }
                     }
                 } else if self.list_is_ordered {
-                    let marker = format!("{}. ", self.list_item_number);
-                    self.list_item_number += 1;
+                    let display_number = self
+                        .pending_ordered_list_number
+                        .take()
+                        .unwrap_or(self.list_item_number);
+                    let marker = format!("{display_number}. ");
+                    self.list_item_number = display_number.saturating_add(1);
                     marker
                 } else {
                     match self.pending_unordered_list_marker.take().unwrap_or('*') {
@@ -895,47 +1180,44 @@ impl Renderer {
     fn render_block_end(&mut self, block: &crate::parsing::Block) {
         match block {
             crate::parsing::Block::Heading { level: _, text: _ } => {
-                // End bold for heading
+                // End heading style.
+                self.current_line.push_str("\x1b[24m");
                 self.render_bold_end();
-
-                let mut text_len = Self::visible_display_width_without_ansi(&self.current_line);
-                if self.in_block_quote {
-                    let mut prefix_width = Self::display_width(&self.block_quote_prefix_string());
-                    if self.in_list && self.list_item_continuation_indent > 0 {
-                        prefix_width += self.list_item_continuation_indent;
-                    }
-                    text_len = text_len.saturating_sub(prefix_width);
-                }
 
                 if !self.current_line.is_empty() {
                     self.lines.push(self.current_line.clone());
                     self.current_line.clear();
-                }
-
-                // Add underline based on heading level (use stored level)
-                let underline = match self.heading_level {
-                    1 => "═",
-                    2 => "─",
-                    _ => "╌",
-                };
-                let underline_str = underline.repeat(text_len.min(self.width));
-                if self.in_block_quote {
-                    let mut line = String::new();
-                    if self.in_list && self.list_item_continuation_indent > 0 {
-                        line.push_str(&" ".repeat(self.list_item_continuation_indent));
-                    }
-                    line.push_str(&self.block_quote_prefix_string());
-                    line.push_str(&underline_str);
-                    self.lines.push(line);
-                } else {
-                    self.lines.push(underline_str);
                 }
                 self.cursor_col = 0;
 
                 // Reset heading state
                 self.heading_level = 0;
             }
-            crate::parsing::Block::CodeBlock { info: _ } => {
+            crate::parsing::Block::CodeBlock { info: _, indented: _ } => {
+                if self.code_block_content_indent > 0 {
+                    // Indented code blocks: no opening/closing fences.
+                    if !self.current_line.is_empty() {
+                        let stripped = Self::strip_ansi(&self.current_line);
+                        let meaningful = stripped.trim_end();
+                        if !meaningful.is_empty() && !Self::is_quote_prefix_only(meaningful) {
+                            let mut line = self.current_line.clone();
+                            line.push_str("\x1b[0m");
+                            self.lines.push(line);
+                        } else if let Some(last) = self.lines.last_mut() {
+                            // Trailing newline created a fresh dim-only line; close style on previous line.
+                            last.push_str("\x1b[0m");
+                        }
+                        self.current_line.clear();
+                    } else if let Some(last) = self.lines.last_mut() {
+                        last.push_str("\x1b[0m");
+                    }
+                    self.cursor_col = 0;
+                    self.in_code_block = false;
+                    self.code_block_info = None;
+                    self.code_block_content_indent = 0;
+                    return;
+                }
+
                 // Flush any meaningful buffered code content line.
                 if !self.current_line.is_empty() {
                     let stripped = Self::strip_ansi(&self.current_line);
@@ -964,6 +1246,7 @@ impl Renderer {
                 // Reset code block state
                 self.in_code_block = false;
                 self.code_block_info = None;
+                self.code_block_content_indent = 0;
             }
             crate::parsing::Block::BlockQuote => {
                 if self.block_quote_depth > 0 {
@@ -993,6 +1276,7 @@ impl Renderer {
             }
             crate::parsing::Block::ListItem => {
                 self.list_item_continuation_indent = 0;
+                self.list_item_paragraph_count = 0;
                 if !self.current_line.is_empty() {
                     self.lines.push(self.current_line.clone());
                     self.current_line.clear();
@@ -1189,6 +1473,64 @@ impl Renderer {
         out
     }
 
+    fn underline_with_ansi(text: &str) -> String {
+        format!("\x1b[4m{text}\x1b[24m")
+    }
+
+    fn render_reference_definition_with_underlined_url(text: &str) -> Option<String> {
+        let trimmed_start = text.trim_start();
+        let leading = text.len().saturating_sub(trimmed_start.len());
+        if !trimmed_start.starts_with('[') {
+            return None;
+        }
+        let close = trimmed_start.find("]:")?;
+        let after = &trimmed_start[close + 2..];
+        let ws_len = after
+            .char_indices()
+            .find_map(|(i, ch)| (!ch.is_whitespace()).then_some(i))
+            .unwrap_or(after.len());
+        let ws = &after[..ws_len];
+        let after_ws = &after[ws_len..];
+        if after_ws.is_empty() {
+            return None;
+        }
+
+        let (dest_token, rest) = if let Some(inner) = after_ws.strip_prefix('<') {
+            let close_angle = inner.find('>')?;
+            (&after_ws[..close_angle + 2], &after_ws[close_angle + 2..])
+        } else {
+            let end = after_ws
+                .char_indices()
+                .find_map(|(i, ch)| ch.is_whitespace().then_some(i))
+                .unwrap_or(after_ws.len());
+            (&after_ws[..end], &after_ws[end..])
+        };
+
+        if dest_token.is_empty() {
+            return None;
+        }
+
+        let underlined_dest = if dest_token.starts_with('<') && dest_token.ends_with('>') {
+            let inner = &dest_token[1..dest_token.len().saturating_sub(1)];
+            format!("<{}>", Self::underline_with_ansi(inner))
+        } else {
+            Self::underline_with_ansi(dest_token)
+        };
+
+        let mut out = String::new();
+        out.push_str(&text[..leading]);
+        out.push_str(&trimmed_start[..close + 2]);
+        out.push_str(ws);
+        out.push_str(&underlined_dest);
+        out.push_str(rest);
+        Some(out)
+    }
+
+    fn is_html_comment(html: &str) -> bool {
+        let trimmed = html.trim();
+        trimmed.starts_with("<!--") && trimmed.ends_with("-->")
+    }
+
     fn inline_code_delimiter(code: &str) -> String {
         let mut max_run = 0usize;
         let mut run = 0usize;
@@ -1208,6 +1550,10 @@ impl Renderer {
     fn visible_display_width_without_ansi(text: &str) -> usize {
         let cleaned = Self::strip_ansi(text);
         Self::display_width(cleaned.trim_end())
+    }
+
+    fn last_visible_char(text: &str) -> Option<char> {
+        Self::strip_ansi(text).chars().last()
     }
 
     fn strip_ansi(text: &str) -> String {

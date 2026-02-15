@@ -92,8 +92,8 @@ fn test_render_bold_asterisks() {
         output
     );
     assert!(
-        output.contains("\x1b[0m"),
-        "Expected bold off code \\x1b[0m in output, got: {:?}",
+        output.contains("\x1b[22m"),
+        "Expected bold off code \\x1b[22m in output, got: {:?}",
         output
     );
     assert!(
@@ -119,8 +119,8 @@ fn test_render_bold_underscores() {
         output
     );
     assert!(
-        output.contains("\x1b[0m"),
-        "Expected bold off code \\x1b[0m in output, got: {:?}",
+        output.contains("\x1b[22m"),
+        "Expected bold off code \\x1b[22m in output, got: {:?}",
         output
     );
     assert!(
@@ -158,8 +158,8 @@ fn test_render_bold_mixed() {
         output
     );
     assert!(
-        output.contains("\x1b[0m"),
-        "Expected bold off code \\x1b[0m in output, got: {:?}",
+        output.contains("\x1b[22m"),
+        "Expected bold off code \\x1b[22m in output, got: {:?}",
         output
     );
 }
@@ -200,8 +200,8 @@ fn test_render_italics_asterisks() {
         output
     );
     assert!(
-        output.contains("\x1b[0m"),
-        "Expected italics off code \\x1b[0m in output, got: {:?}",
+        output.contains("\x1b[23m"),
+        "Expected italics off code \\x1b[23m in output, got: {:?}",
         output
     );
     assert!(
@@ -227,8 +227,8 @@ fn test_render_italics_underscores() {
         output
     );
     assert!(
-        output.contains("\x1b[0m"),
-        "Expected italics off code \\x1b[0m in output, got: {:?}",
+        output.contains("\x1b[23m"),
+        "Expected italics off code \\x1b[23m in output, got: {:?}",
         output
     );
     assert!(
@@ -266,8 +266,8 @@ fn test_render_italics_mixed() {
         output
     );
     assert!(
-        output.contains("\x1b[0m"),
-        "Expected italics off code \\x1b[0m in output, got: {:?}",
+        output.contains("\x1b[23m"),
+        "Expected italics off code \\x1b[23m in output, got: {:?}",
         output
     );
 }
@@ -312,7 +312,59 @@ fn test_render_nested_emphasis_keeps_word_spacing() {
     );
 }
 
-/// Test h1 heading rendering with box-drawing underline
+#[test]
+fn test_render_nested_inner_strong_keeps_outer_italics_state() {
+    let markdown = "*nested **inner strong** text*";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("nested inner strong text"),
+        "Expected text content preserved, got: {:?}",
+        plain
+    );
+    assert!(
+        output.contains("\x1b[3m") && output.contains("\x1b[23m"),
+        "Expected italic start/end codes for outer emphasis, got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("\x1b[1m") && output.contains("\x1b[22m"),
+        "Expected bold start/end codes for inner strong span, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_overlapping_emphasis_keeps_outer_italics_active() {
+    let markdown = "*a **b* c**\n\n**a *b** c*";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("a b c\n\na b c"),
+        "Expected overlapping emphasis text content, got: {:?}",
+        plain
+    );
+    assert_eq!(
+        output.matches("\x1b[3m").count(),
+        2,
+        "Expected one italic start per paragraph for overlapping emphasis, got: {:?}",
+        output
+    );
+    assert_eq!(
+        output.matches("\x1b[23m").count(),
+        2,
+        "Expected one italic end per paragraph for overlapping emphasis, got: {:?}",
+        output
+    );
+}
+
+/// Test h1 heading rendering with ANSI underline
 #[test]
 fn test_render_h1() {
     let markdown = "# Title";
@@ -327,15 +379,20 @@ fn test_render_h1() {
         "Expected 'Title' in output, got: {:?}",
         output
     );
-    // Should have Unicode heavy line underline
     assert!(
-        output.contains("═══"),
-        "Expected heavy underline in output, got: {:?}",
+        strip_ansi(&output).contains("# Title"),
+        "Expected Markdown heading marker in output, got: {:?}",
+        output
+    );
+    // Should use ANSI underline
+    assert!(
+        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
+        "Expected ANSI underline codes in output, got: {:?}",
         output
     );
 }
 
-/// Test h2 heading rendering with --- underline
+/// Test h2 heading rendering with ANSI underline
 #[test]
 fn test_render_h2() {
     let markdown = "## Section";
@@ -350,10 +407,15 @@ fn test_render_h2() {
         "Expected 'Section' in output, got: {:?}",
         output
     );
-    // Should have Unicode single line underline
     assert!(
-        output.contains("───"),
-        "Expected single-line underline in output, got: {:?}",
+        strip_ansi(&output).contains("## Section"),
+        "Expected Markdown heading marker in output, got: {:?}",
+        output
+    );
+    // Should use ANSI underline
+    assert!(
+        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
+        "Expected ANSI underline codes in output, got: {:?}",
         output
     );
 }
@@ -371,10 +433,10 @@ fn test_render_h3_to_h6() {
         "Expected 'Heading 3' in output, got: {:?}",
         output
     );
-    // h3 uses dotted-line underline
+    // h3 should be underlined inline
     assert!(
-        output.contains("╌╌╌"),
-        "Expected dotted underline for h3 in output, got: {:?}",
+        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
+        "Expected ANSI underline for h3 in output, got: {:?}",
         output
     );
 
@@ -434,8 +496,8 @@ fn test_render_heading_bold() {
         output
     );
     assert!(
-        output.contains("\x1b[0m"),
-        "Expected bold off code \\x1b[0m in output, got: {:?}",
+        output.contains("\x1b[22m"),
+        "Expected bold off code \\x1b[22m in output, got: {:?}",
         output
     );
 }
@@ -448,19 +510,38 @@ fn test_heading_underline_matches_visible_heading_width() {
     let mut renderer = Renderer::new(80);
     let output = renderer.render(&events);
 
-    let lines: Vec<&str> = output.lines().collect();
-    assert!(lines.len() >= 2, "Expected heading and underline lines");
-
-    let heading_line = lines[0];
-    let underline_line = lines[1];
-
-    let heading_visible = strip_ansi(heading_line);
-    assert_eq!(
-        heading_visible.chars().count(),
-        underline_line.chars().count(),
-        "Underline should match visible heading width: {:?}",
+    assert!(
+        output.lines().count() == 1,
+        "Expected compact single-line heading rendering, got: {:?}",
         output
     );
+    assert!(
+        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
+        "Expected inline ANSI underline for heading, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_consecutive_atx_headings_have_no_blank_lines_between() {
+    let markdown = "# H1\n## H2\n### H3";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    assert!(
+        lines.len() >= 3,
+        "Expected at least three heading lines, got: {:?}",
+        plain
+    );
+    let h1 = lines.iter().position(|l| l.contains("# H1")).expect("Missing H1");
+    let h2 = lines.iter().position(|l| l.contains("## H2")).expect("Missing H2");
+    let h3 = lines.iter().position(|l| l.contains("### H3")).expect("Missing H3");
+
+    assert_eq!(h2, h1 + 1, "Unexpected blank line between H1 and H2: {:?}", plain);
+    assert_eq!(h3, h2 + 1, "Unexpected blank line between H2 and H3: {:?}", plain);
 }
 
 fn strip_ansi(input: &str) -> String {
@@ -479,6 +560,13 @@ fn strip_ansi(input: &str) -> String {
         out.push(ch);
     }
     out
+}
+
+fn strip_combining_marks(input: &str) -> String {
+    input
+        .chars()
+        .filter(|&c| c != '\u{0332}' && c != '\u{0333}' && c != '\u{0336}')
+        .collect()
 }
 
 /// Test fenced code block rendering
@@ -537,6 +625,11 @@ fn test_render_indented_code_block() {
         "Expected faint code \\x1b[2m in output, got: {:?}",
         output
     );
+    assert!(
+        !output.contains("```"),
+        "Expected indented code block to render without fenced markers, got: {:?}",
+        output
+    );
 }
 
 /// Test inline code rendering with backticks
@@ -579,6 +672,62 @@ fn test_render_inline_code_with_backticks_inside() {
     assert!(
         output.contains("``\x1b[2mcode with `backtick` inside\x1b[0m``"),
         "Expected renderer to use a longer backtick delimiter, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_html_comment_is_dimmed() {
+    let markdown = "<!-- hidden note -->";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    assert!(
+        output.contains("\x1b[2m<!-- hidden note -->\x1b[22m"),
+        "Expected HTML comment to be dimmed, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_non_comment_html_is_not_dimmed() {
+    let markdown = "<span>visible</span>";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    assert!(
+        output.contains("<span>visible</span>"),
+        "Expected raw HTML to render as-is, got: {:?}",
+        output
+    );
+    assert!(
+        !output.contains("\x1b[2m<span>visible</span>\x1b[22m"),
+        "Expected non-comment HTML to avoid comment dimming, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_html_comment_block_has_no_extra_empty_comment_line() {
+    let markdown = "before\n\n<!-- hidden -->\nafter";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        !plain.contains("\n\n\n"),
+        "Expected no extra blank line introduced by HTML comment block, got: {:?}",
+        plain
+    );
+    assert!(
+        !output.contains("\x1b[2m\x1b[22m"),
+        "Expected no empty styled line for HTML comment block, got: {:?}",
         output
     );
 }
@@ -959,7 +1108,7 @@ fn test_render_tight_list_has_no_blank_lines_between_items() {
 }
 
 #[test]
-fn test_render_list_with_blank_lines_between_items_stays_compact() {
+fn test_render_list_with_blank_lines_between_items_preserves_gap() {
     let markdown = "- loose a\n\n- loose b";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(80);
@@ -976,10 +1125,14 @@ fn test_render_list_with_blank_lines_between_items_stays_compact() {
         .position(|line| line.contains("loose b"))
         .expect("Expected second loose list item");
 
-    assert_eq!(
-        second_idx,
-        first_idx + 1,
-        "Expected compact list rendering (no extra blank line between items), got: {:?}",
+    assert!(
+        second_idx >= first_idx + 2,
+        "Expected blank line preserved between loose list items, got: {:?}",
+        plain
+    );
+    assert!(
+        lines[first_idx + 1].trim().is_empty(),
+        "Expected explicit blank line between loose list items, got: {:?}",
         plain
     );
 }
@@ -999,17 +1152,19 @@ fn test_render_link() {
         "Expected 'link' in output, got: {:?}",
         output
     );
+    let plain = strip_combining_marks(&strip_ansi(&output));
+
     // Should contain the URL in parentheses
     assert!(
-        output.contains("(http://example.com)"),
+        plain.contains("(http://example.com)"),
         "Expected '(http://example.com)' in output, got: {:?}",
-        output
+        plain
     );
-    // Should render as "link (url)" format
+    // Should render in markdown link form
     assert!(
-        output.contains("link (http://example.com)"),
-        "Expected 'link (http://example.com)' in output, got: {:?}",
-        output
+        plain.contains("[link](http://example.com)"),
+        "Expected '[link](http://example.com)' in output, got: {:?}",
+        plain
     );
 }
 
@@ -1032,6 +1187,87 @@ fn test_render_reference_link() {
     // or text with empty parentheses since the reference is not defined
 }
 
+#[test]
+fn test_render_link_with_inline_code_label_no_duplicate_code_prefix() {
+    let markdown = "[link with `code` inside](https://example.com)";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("[link with `code` inside](https://example.com)"),
+        "Expected markdown-like link output, got: {:?}",
+        plain
+    );
+    assert!(
+        !plain.starts_with("`code` "),
+        "Unexpected duplicated inline code prefix before link, got: {:?}",
+        plain
+    );
+}
+
+#[test]
+fn test_render_reference_definitions_without_blank_lines_and_with_underlined_urls() {
+    let markdown = "[id1]: https://example.com/ref \"Ref One\"\n[id2]: https://example.com/collapsed\n";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_combining_marks(&strip_ansi(&output));
+    let lines: Vec<&str> = plain.lines().collect();
+
+    let id1_idx = lines
+        .iter()
+        .position(|line| line.contains("[id1]: https://example.com/ref"))
+        .expect("Expected first reference definition line");
+    let id2_idx = lines
+        .iter()
+        .position(|line| line.contains("[id2]: https://example.com/collapsed"))
+        .expect("Expected second reference definition line");
+
+    assert_eq!(
+        id2_idx,
+        id1_idx + 1,
+        "Expected consecutive reference definition lines without blank line, got: {:?}",
+        plain
+    );
+    assert!(
+        output.contains("[id1]: \x1b[4mhttps://example.com/ref\x1b[24m \"Ref One\""),
+        "Expected underlined URL in first reference definition, got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("[id2]: \x1b[4mhttps://example.com/collapsed\x1b[24m"),
+        "Expected underlined URL in second reference definition, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_reference_definitions_keep_blank_line_after_section_heading() {
+    let markdown = "## 18. Reference Definitions\n\n[id1]: https://example.com/ref \"Ref One\"\n[id2]: https://example.com/collapsed\n";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    let heading_idx = lines
+        .iter()
+        .position(|line| line.contains("## 18. Reference Definitions"))
+        .expect("Expected heading line");
+    let first_ref_idx = lines
+        .iter()
+        .position(|line| line.contains("[id1]: https://example.com/ref"))
+        .expect("Expected first reference definition line");
+    assert_eq!(
+        first_ref_idx,
+        heading_idx + 2,
+        "Expected exactly one blank line after heading before definitions, got: {:?}",
+        plain
+    );
+}
+
 /// Test image rendering - ![alt](url) should show alt text
 #[test]
 fn test_render_image_alt_text() {
@@ -1041,16 +1277,30 @@ fn test_render_image_alt_text() {
     let mut renderer = Renderer::new(80);
     let output = renderer.render(&events);
 
-    // Should contain the alt text
+    // Should preserve image markdown form
     assert!(
-        output.contains("alt text"),
-        "Expected 'alt text' in output, got: {:?}",
+        output.contains("![alt text](http://example.com/image.png)"),
+        "Expected inline image markdown form in output, got: {:?}",
         output
     );
-    // Should render as "[alt text]" format (not actual image)
 }
 
-/// Test URL auto-link rendering - <https://example.com> should render as "https://example.com (https://example.com)"
+#[test]
+fn test_render_reference_image_preserves_markdown_form() {
+    let markdown = "[img1]: https://example.com/ref-image.png\n\n![ref image][img1]";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("![ref image][img1]"),
+        "Expected reference image markdown form in output, got: {:?}",
+        plain
+    );
+}
+
+/// Test URL auto-link rendering - <https://example.com> should render once
 #[test]
 fn test_render_url_auto_link() {
     let markdown = "<https://example.com>";
@@ -1059,21 +1309,22 @@ fn test_render_url_auto_link() {
     let mut renderer = Renderer::new(80);
     let output = renderer.render(&events);
 
-    // Should contain the URL
+    let plain = strip_combining_marks(&strip_ansi(&output));
+    // Should render URL once (autolink should not duplicate as url(url))
     assert!(
-        output.contains("https://example.com"),
-        "Expected 'https://example.com' in output, got: {:?}",
-        output
+        plain.contains("<https://example.com>"),
+        "Expected URL in output, got: {:?}",
+        plain
     );
-    // Should render as "url (url)" format
-    assert!(
-        output.contains("https://example.com (https://example.com)"),
-        "Expected 'https://example.com (https://example.com)' in output, got: {:?}",
-        output
+    assert_eq!(
+        plain.matches("https://example.com").count(),
+        1,
+        "Expected URL autolink to appear once, got: {:?}",
+        plain
     );
 }
 
-/// Test email auto-link rendering - <user@example.com> should render as "user@example.com (user@example.com)"
+/// Test email auto-link rendering - <user@example.com> should render once
 #[test]
 fn test_render_email_auto_link() {
     let markdown = "<user@example.com>";
@@ -1082,17 +1333,18 @@ fn test_render_email_auto_link() {
     let mut renderer = Renderer::new(80);
     let output = renderer.render(&events);
 
-    // Should contain the email
+    let plain = strip_combining_marks(&strip_ansi(&output));
+    // Should render email once (autolink should not duplicate as email(email))
     assert!(
-        output.contains("user@example.com"),
+        plain.contains("<user@example.com>"),
         "Expected 'user@example.com' in output, got: {:?}",
-        output
+        plain
     );
-    // Should render as "email (email)" format
-    assert!(
-        output.contains("user@example.com (user@example.com)"),
-        "Expected 'user@example.com (user@example.com)' in output, got: {:?}",
-        output
+    assert_eq!(
+        plain.matches("user@example.com").count(),
+        1,
+        "Expected email autolink to appear once, got: {:?}",
+        plain
     );
 }
 
@@ -1116,6 +1368,61 @@ fn test_render_escape_asterisk() {
         !output.contains("\x1b[3m"),
         "Expected no italics code in output for escaped asterisk, got: {:?}",
         output
+    );
+}
+
+#[test]
+fn test_render_escaped_image_like_syntax_keeps_bracketed_link_form() {
+    let markdown = "\\![not image](x)";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_combining_marks(&strip_ansi(&output));
+
+    assert!(
+        plain.contains("![not image](x)"),
+        "Expected escaped image-like syntax to keep markdown-like form, got: {:?}",
+        plain
+    );
+    assert!(
+        !output.contains("\x1b[4m"),
+        "Expected no URL underlining for escaped image-like syntax, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_escaped_punctuation_preserves_token_separation() {
+    let markdown = "Escaped punctuation: \\[ \\] \\( \\) \\.";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("[ ] ( ) ."),
+        "Expected escaped punctuation tokens to stay separated by spaces, got: {:?}",
+        plain
+    );
+}
+
+#[test]
+fn test_render_literal_escaped_brackets_in_links_section_style() {
+    let markdown = "Literal brackets in text: \\[not a link\\].";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("[not a link]"),
+        "Expected escaped literal brackets to render without backslashes, got: {:?}",
+        plain
+    );
+    assert!(
+        !plain.contains("\\[not a link\\]"),
+        "Unexpected backslashes in literal bracket output, got: {:?}",
+        plain
     );
 }
 
@@ -1185,14 +1492,21 @@ fn test_render_horizontal_rule_dashes() {
     let output = renderer.render(&events);
 
     let first_line = output.lines().next().unwrap_or("");
+    let trimmed = first_line.trim_start();
     assert_eq!(
-        first_line.chars().count(),
-        80,
-        "Expected full-width horizontal rule, got: {:?}",
+        trimmed.chars().count(),
+        40,
+        "Expected half-width horizontal rule, got: {:?}",
+        output
+    );
+    assert_eq!(
+        first_line.len().saturating_sub(trimmed.len()),
+        20,
+        "Expected centered rule with left padding, got: {:?}",
         output
     );
     assert!(
-        first_line.chars().all(|c| c == '─'),
+        trimmed.chars().all(|c| c == '─'),
         "Expected Unicode line-only horizontal rule output, got: {:?}",
         output
     );
@@ -1207,13 +1521,20 @@ fn test_render_horizontal_rule_asterisks() {
     let output = renderer.render(&events);
 
     let first_line = output.lines().next().unwrap_or("");
+    let trimmed = first_line.trim_start();
     assert_eq!(
-        first_line.chars().count(),
-        80,
-        "Expected full-width rule, got: {:?}",
+        trimmed.chars().count(),
+        40,
+        "Expected half-width rule, got: {:?}",
         output
     );
-    assert!(first_line.chars().all(|c| c == '═'));
+    assert_eq!(
+        first_line.len().saturating_sub(trimmed.len()),
+        20,
+        "Expected centered rule with left padding, got: {:?}",
+        output
+    );
+    assert!(trimmed.chars().all(|c| c == '═'));
 }
 
 /// Test horizontal rule rendering for '___'
@@ -1225,13 +1546,20 @@ fn test_render_horizontal_rule_underscores() {
     let output = renderer.render(&events);
 
     let first_line = output.lines().next().unwrap_or("");
+    let trimmed = first_line.trim_start();
     assert_eq!(
-        first_line.chars().count(),
-        80,
-        "Expected full-width rule, got: {:?}",
+        trimmed.chars().count(),
+        40,
+        "Expected half-width rule, got: {:?}",
         output
     );
-    assert!(first_line.chars().all(|c| c == '┄'));
+    assert_eq!(
+        first_line.len().saturating_sub(trimmed.len()),
+        20,
+        "Expected centered rule with left padding, got: {:?}",
+        output
+    );
+    assert!(trimmed.chars().all(|c| c == '┄'));
 }
 
 /// Test strikethrough rendering
@@ -1249,8 +1577,8 @@ fn test_render_strikethrough() {
         output
     );
     assert!(
-        output.contains("\x1b[0m"),
-        "Expected reset code \\x1b[0m, got: {:?}",
+        output.contains("\x1b[29m"),
+        "Expected reset code \\x1b[29m, got: {:?}",
         output
     );
     assert!(
@@ -1429,16 +1757,17 @@ fn test_render_task_list_unchecked() {
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(80);
     let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
 
     assert!(
-        output.contains("[ ]"),
+        plain.contains("- [ ] todo item"),
         "Expected unchecked task marker '[ ]', got: {:?}",
-        output
+        plain
     );
     assert!(
-        output.contains("todo item"),
+        plain.contains("todo item"),
         "Expected task content, got: {:?}",
-        output
+        plain
     );
 }
 
@@ -1449,16 +1778,17 @@ fn test_render_task_list_checked() {
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(80);
     let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
 
     assert!(
-        output.contains("[x]"),
-        "Expected checked task marker '[x]', got: {:?}",
-        output
+        plain.contains("[✔]"),
+        "Expected checked task marker '[✔]', got: {:?}",
+        plain
     );
     assert!(
-        output.contains("done item"),
+        plain.contains("done item"),
         "Expected task content, got: {:?}",
-        output
+        plain
     );
 }
 
@@ -1469,17 +1799,18 @@ fn test_render_task_list_mixed() {
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(80);
     let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
 
     assert!(
-        output.contains("[ ]"),
-        "Expected unchecked task marker in mixed list, got: {:?}",
-        output
+        plain.contains("- [ ] first"),
+        "Expected unchecked task marker '[ ]', got: {:?}",
+        plain
     );
-    let checked_count = output.matches("[x]").count();
+    let checked_count = plain.matches("[✔]").count();
     assert!(
         checked_count >= 2,
-        "Expected at least two checked markers '[x]' (for x/X), got {checked_count} in {:?}",
-        output
+        "Expected at least two checked markers '[✔]' (for x/X), got {checked_count} in {:?}",
+        plain
     );
 }
 
@@ -1701,6 +2032,21 @@ fn test_render_smart_punctuation_preserves_quoted_literals() {
 }
 
 #[test]
+fn test_render_preserves_two_blank_lines_between_paragraphs() {
+    let markdown = "Text before.\n\n\nText after two blank lines.";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("Text before.\n\n\nText after two blank lines."),
+        "Expected two blank lines preserved between paragraphs, got: {:?}",
+        plain
+    );
+}
+
+#[test]
 fn test_render_block_quote_prefixes_content_lines() {
     let markdown = "> quoted text\n>\n> second paragraph";
     let events: Vec<Event> = parse_markdown(markdown).collect();
@@ -1838,6 +2184,21 @@ fn test_render_inline_html_keeps_inner_spacing() {
 }
 
 #[test]
+fn test_render_inline_code_surrounded_by_spaces_variant() {
+    let markdown = "Use `` `surrounded by spaces` `` style delimiters.";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("`` `surrounded by spaces` ``"),
+        "Expected spaced two-backtick serialization preserved, got: {:?}",
+        plain
+    );
+}
+
+#[test]
 fn test_render_blockquote_heading_underline_keeps_quote_prefix() {
     let markdown = "> ## Quoted";
     let events: Vec<Event> = parse_markdown(markdown).collect();
@@ -1847,31 +2208,38 @@ fn test_render_blockquote_heading_underline_keeps_quote_prefix() {
     let lines: Vec<&str> = plain.lines().collect();
 
     assert!(
-        lines.iter().any(|line| line.starts_with("│ Quoted")),
+        lines.iter().any(|line| line.starts_with("│ ## Quoted")),
         "Expected quoted heading line, got: {:?}",
         plain
     );
     assert!(
-        lines.iter().any(|line| line.starts_with("│ ─")),
-        "Expected heading underline to stay inside quote context, got: {:?}",
-        plain
+        output.contains("\x1b[4m") && output.contains("\x1b[24m"),
+        "Expected inline ANSI underline within quoted heading, got: {:?}",
+        output
     );
+}
 
-    let heading_line = lines
+#[test]
+fn test_render_blockquote_paragraph_to_heading_has_no_extra_blank_line_without_source_gap() {
+    let markdown = "> Quote with heading\n> ## Quoted heading";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    let quote_idx = lines
         .iter()
-        .find(|line| line.starts_with("│ Quoted"))
+        .position(|line| line.trim() == "│ Quote with heading")
+        .expect("Expected first quote line");
+    let heading_idx = lines
+        .iter()
+        .position(|line| line.trim() == "│ ## Quoted heading")
         .expect("Expected quoted heading line");
-    let underline_line = lines
-        .iter()
-        .find(|line| line.starts_with("│ ─"))
-        .expect("Expected quoted heading underline line");
-
-    let heading_text = heading_line.strip_prefix("│ ").unwrap_or(heading_line);
-    let underline_text = underline_line.strip_prefix("│ ").unwrap_or(underline_line);
     assert_eq!(
-        heading_text.chars().count(),
-        underline_text.chars().count(),
-        "Quoted heading underline should match heading text width, got: {:?}",
+        heading_idx,
+        quote_idx + 1,
+        "Unexpected blank line between quote paragraph and heading: {:?}",
         plain
     );
 }
@@ -1889,8 +2257,88 @@ fn test_render_list_second_paragraph_keeps_continuation_indent() {
         .position(|line| line.contains("second paragraph"))
         .expect("Expected second paragraph line");
     assert!(
+        idx > 0 && lines[idx - 1].trim().is_empty(),
+        "Expected blank line before second paragraph in same list item, got: {:?}",
+        plain
+    );
+    assert!(
         lines[idx].starts_with("  "),
         "Expected second paragraph to keep list continuation indent, got: {:?}",
+        plain
+    );
+}
+
+#[test]
+fn test_render_ordered_list_preserves_source_markers() {
+    let markdown = "3. starts at three\n4. next item";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    assert!(
+        lines.iter().any(|line| line.trim_start().starts_with("3. starts at three")),
+        "Expected first ordered item to keep source marker 3., got: {:?}",
+        plain
+    );
+    assert!(
+        lines.iter().any(|line| line.trim_start().starts_with("4. next item")),
+        "Expected second ordered item to keep source marker 4., got: {:?}",
+        plain
+    );
+}
+
+#[test]
+fn test_render_ordered_list_preserves_blank_lines_between_items() {
+    let markdown = "3. three\n\n4. next item\n";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    let idx_three = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("3. three"))
+        .expect("Expected first ordered item");
+    let idx_next = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("4. next item"))
+        .expect("Expected second ordered item");
+    assert!(
+        idx_next >= idx_three + 2,
+        "Expected at least one blank line between ordered items, got: {:?}",
+        plain
+    );
+    assert!(
+        lines[idx_three + 1].trim().is_empty(),
+        "Expected explicit blank line between ordered items, got: {:?}",
+        plain
+    );
+}
+
+#[test]
+fn test_render_mixed_list_content_preserves_softbreak_line_in_item() {
+    let markdown = "- item with paragraph continuation\n  still same list item paragraph";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    let first_idx = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("- item with paragraph continuation"))
+        .expect("Expected first list line");
+    let second_idx = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("still same list item paragraph"))
+        .expect("Expected continuation list line");
+    assert_eq!(
+        second_idx,
+        first_idx + 1,
+        "Expected soft break in list item to remain a new continuation line, got: {:?}",
         plain
     );
 }

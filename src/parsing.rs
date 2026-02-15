@@ -32,15 +32,30 @@ pub enum Event {
     /// Raw HTML (block or inline)
     RawHtml(String),
     /// Link with text and URL
-    Link { text: String, url: String },
-    /// Image with alt text and URL (skip rendering, just show alt text)
-    Image { alt: String, url: String },
+    Link {
+        text: String,
+        url: String,
+        source: String,
+    },
+    /// Image with alt text and URL, preserving original markdown source when available
+    Image {
+        alt: String,
+        url: String,
+        source: String,
+    },
     /// Task list checkbox marker (`- [ ]` or `- [x]`)
     TaskListMarker(bool),
     /// Footnote reference (e.g. [^1])
     FootnoteReference(String),
     /// Unordered list item marker from source ('-', '*', '+')
     ListItemMarker(char),
+    /// Ordered list item marker number from source (e.g. `3.` -> 3)
+    OrderedListItemMarker(u64),
+    /// Source had a blank line immediately before this list item line
+    ListItemPrecededByBlankLine,
+    /// Extra blank lines in source between adjacent block-level elements
+    /// beyond the single semantic paragraph separator.
+    InterBlockBlankLines(usize),
 }
 
 /// Block elements in markdown
@@ -53,7 +68,7 @@ pub enum Block {
     /// Block quote
     BlockQuote,
     /// Code block
-    CodeBlock { info: Option<String> },
+    CodeBlock { info: Option<String>, indented: bool },
     /// Unordered list
     List { start: Option<u64> },
     /// List item
@@ -96,56 +111,74 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
             | Options::ENABLE_DEFINITION_LIST,
     );
     // Track link/image state: (is_link, is_image, url)
-    let mut link_state: Option<(bool, bool, String)> = None;
+    let mut link_state: Option<(bool, bool, String, usize)> = None;
     let mut link_text = String::new();
-    let rule_markers = detect_thematic_break_markers(markdown);
-    let mut rule_index = 0usize;
-    let unordered_item_markers = detect_unordered_item_markers(markdown);
-    let mut unordered_item_index = 0usize;
     let mut list_kind_stack: Vec<bool> = Vec::new(); // true = ordered, false = unordered
+    let mut out = Vec::new();
+    let mut prev_end = 0usize;
 
-    parser.flat_map(move |event| {
-        let mut result = Vec::new();
+    for (event, range) in parser.into_offset_iter() {
+        if should_emit_inter_block_blank_lines_before_event(&event, markdown, range.start) {
+            let blank_lines = blank_lines_before_offset(markdown, range.start);
+            if blank_lines > 0 {
+                out.push(Event::InterBlockBlankLines(blank_lines));
+            }
+        }
 
+        if range.start > prev_end {
+            emit_reference_definition_gap_events(markdown, prev_end, range.start, &mut out);
+        }
         match event {
             MdEvent::Start(tag) => {
                 match tag {
                     Tag::Link { dest_url, .. } => {
                         // Start of a link - store the URL and track state
-                        link_state = Some((true, false, dest_url.to_string()));
+                        link_state = Some((true, false, dest_url.to_string(), range.start));
                         link_text.clear();
                     }
                     Tag::Image { dest_url, .. } => {
                         // Start of an image - store the URL and track state
-                        link_state = Some((false, true, dest_url.to_string()));
+                        link_state = Some((false, true, dest_url.to_string(), range.start));
                         link_text.clear();
                     }
                     Tag::Strong => {
-                        result.push(Event::StrongStart);
+                        out.push(Event::StrongStart);
                     }
                     Tag::Emphasis => {
-                        result.push(Event::EmphasisStart);
+                        out.push(Event::EmphasisStart);
                     }
                     Tag::Strikethrough => {
-                        result.push(Event::StrikethroughStart);
+                        out.push(Event::StrikethroughStart);
                     }
                     Tag::List(start) => {
                         list_kind_stack.push(start.is_some());
-                        result.push(Event::Start(Block::List { start }));
+                        out.push(Event::Start(Block::List { start }));
                     }
                     Tag::Item => {
-                        if list_kind_stack.last().copied() == Some(false) {
-                            if let Some(marker) =
-                                unordered_item_markers.get(unordered_item_index).copied()
-                            {
-                                unordered_item_index += 1;
-                                result.push(Event::ListItemMarker(marker));
-                            }
+                        if list_item_has_blank_line_before_at_offset(markdown, range.start) {
+                            out.push(Event::ListItemPrecededByBlankLine);
                         }
-                        result.push(Event::Start(Block::ListItem));
+                        match list_kind_stack.last().copied() {
+                            Some(false) => {
+                                if let Some(marker) =
+                                    unordered_list_marker_at_offset(markdown, range.start)
+                                {
+                                    out.push(Event::ListItemMarker(marker));
+                                }
+                            }
+                            Some(true) => {
+                                if let Some(number) =
+                                    ordered_list_number_at_offset(markdown, range.start)
+                                {
+                                    out.push(Event::OrderedListItemMarker(number));
+                                }
+                            }
+                            _ => {}
+                        }
+                        out.push(Event::Start(Block::ListItem));
                     }
                     _ => {
-                        result.push(Event::Start(convert_tag(tag)));
+                        out.push(Event::Start(convert_tag(tag)));
                     }
                 }
             }
@@ -153,49 +186,58 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                 match tag {
                     TagEnd::Link => {
                         // End of a link - emit the Link event with text and URL
-                        if let Some((true, false, url)) = link_state.take() {
-                            result.push(Event::Link {
+                        if let Some((true, false, url, start_offset)) = link_state.take() {
+                            let source =
+                                extract_link_source_from_markdown(markdown, start_offset, range.end);
+                            out.push(Event::Link {
                                 text: link_text.clone(),
                                 url,
+                                source,
                             });
                         } else {
                             // Fallback (shouldn't happen in well-formed markdown)
                             if !link_text.is_empty() {
-                                result.push(Event::Text(link_text.clone()));
+                                out.push(Event::Text(link_text.clone()));
                             }
                         }
                         link_text.clear();
                     }
                     TagEnd::Image => {
                         // End of an image - emit the Image event with alt and URL
-                        if let Some((false, true, url)) = link_state.take() {
-                            result.push(Event::Image {
+                        if let Some((false, true, url, start_offset)) = link_state.take() {
+                            let source = extract_image_source_from_markdown(
+                                markdown,
+                                start_offset,
+                                range.end,
+                            );
+                            out.push(Event::Image {
                                 alt: link_text.clone(),
                                 url,
+                                source,
                             });
                         } else {
                             // Fallback
                             if !link_text.is_empty() {
-                                result.push(Event::Text(link_text.clone()));
+                                out.push(Event::Text(link_text.clone()));
                             }
                         }
                         link_text.clear();
                     }
                     TagEnd::Strong => {
-                        result.push(Event::StrongEnd);
+                        out.push(Event::StrongEnd);
                     }
                     TagEnd::Emphasis => {
-                        result.push(Event::EmphasisEnd);
+                        out.push(Event::EmphasisEnd);
                     }
                     TagEnd::Strikethrough => {
-                        result.push(Event::StrikethroughEnd);
+                        out.push(Event::StrikethroughEnd);
                     }
                     TagEnd::List(_) => {
                         let _ = list_kind_stack.pop();
-                        result.push(Event::End(convert_tag_end(tag)));
+                        out.push(Event::End(convert_tag_end(tag)));
                     }
                     _ => {
-                        result.push(Event::End(convert_tag_end(tag)));
+                        out.push(Event::End(convert_tag_end(tag)));
                     }
                 }
             }
@@ -204,44 +246,288 @@ pub fn parse_markdown(markdown: &str) -> impl Iterator<Item = Event> + '_ {
                     // Accumulate text for link/image
                     link_text.push_str(&text);
                 } else {
-                    result.push(Event::Text(text.to_string()));
+                    let raw = markdown.get(range.start..range.end).unwrap_or_default();
+                    let line = line_at_offset(markdown, range.start);
+                    if raw.contains("\\[") || raw.contains("\\]") {
+                        out.push(Event::Text(raw.to_string()));
+                    } else if line.contains("\\[")
+                        && line.contains("\\]")
+                        && text.contains('[')
+                        && text.contains(']')
+                        && !text.contains("\\[")
+                    {
+                        let with_open = text.replacen('[', "\\[", 1);
+                        let with_both = with_open.replacen(']', "\\]", 1);
+                        out.push(Event::Text(with_both));
+                    } else if text.starts_with('[') && text.ends_with(']') {
+                        let inner = text.trim_start_matches('[').trim_end_matches(']');
+                        let pattern = format!("\\[{inner}\\]");
+                        if line.contains(&pattern) {
+                            out.push(Event::Text(pattern));
+                        } else {
+                            out.push(Event::Text(text.to_string()));
+                        }
+                    } else {
+                        out.push(Event::Text(text.to_string()));
+                    }
                 }
             }
-            MdEvent::SoftBreak => result.push(Event::SoftBreak),
-            MdEvent::HardBreak => result.push(Event::HardBreak),
+            MdEvent::SoftBreak => out.push(Event::SoftBreak),
+            MdEvent::HardBreak => out.push(Event::HardBreak),
             MdEvent::Rule => {
-                let marker = rule_markers.get(rule_index).copied().unwrap_or('-');
-                rule_index += 1;
-                result.push(Event::Rule(marker));
+                let marker = thematic_break_marker_at_offset(markdown, range.start).unwrap_or('-');
+                out.push(Event::Rule(marker));
             }
-            MdEvent::Code(code) => result.push(Event::InlineCode(code.to_string())),
-            MdEvent::InlineMath(_) => result.push(Event::Text(String::new())),
-            MdEvent::DisplayMath(_) => result.push(Event::Text(String::new())),
-            MdEvent::Html(html) => result.push(Event::RawHtml(html.to_string())),
-            MdEvent::InlineHtml(html) => result.push(Event::RawHtml(html.to_string())),
+            MdEvent::Code(code) => {
+                if link_state.is_some() {
+                    // Inline code inside link/image labels belongs to label text.
+                    link_text.push_str(&code);
+                } else {
+                    out.push(Event::InlineCode(code.to_string()));
+                }
+            }
+            MdEvent::InlineMath(_) => out.push(Event::Text(String::new())),
+            MdEvent::DisplayMath(_) => out.push(Event::Text(String::new())),
+            MdEvent::Html(html) => out.push(Event::RawHtml(html.to_string())),
+            MdEvent::InlineHtml(html) => out.push(Event::RawHtml(html.to_string())),
             MdEvent::FootnoteReference(label) => {
-                result.push(Event::FootnoteReference(label.to_string()))
+                out.push(Event::FootnoteReference(label.to_string()))
             }
-            MdEvent::TaskListMarker(checked) => result.push(Event::TaskListMarker(checked)),
+            MdEvent::TaskListMarker(checked) => out.push(Event::TaskListMarker(checked)),
+        }
+        prev_end = range.end;
+    }
+
+    if prev_end < markdown.len() {
+        emit_reference_definition_gap_events(markdown, prev_end, markdown.len(), &mut out);
+    }
+
+    out.into_iter()
+}
+
+fn line_at_offset(markdown: &str, mut offset: usize) -> &str {
+    if markdown.is_empty() {
+        return "";
+    }
+    if offset >= markdown.len() {
+        offset = markdown.len() - 1;
+    }
+    let start = markdown[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let end = markdown[offset..]
+        .find('\n')
+        .map_or(markdown.len(), |i| offset + i);
+    &markdown[start..end]
+}
+
+fn thematic_break_marker_at_offset(markdown: &str, offset: usize) -> Option<char> {
+    thematic_break_marker_for_line(line_at_offset(markdown, offset))
+}
+
+fn unordered_list_marker_at_offset(markdown: &str, offset: usize) -> Option<char> {
+    unordered_list_marker_for_line(line_at_offset(markdown, offset))
+}
+
+fn ordered_list_number_at_offset(markdown: &str, offset: usize) -> Option<u64> {
+    ordered_list_number_for_line(line_at_offset(markdown, offset))
+}
+
+fn list_item_has_blank_line_before_at_offset(markdown: &str, mut offset: usize) -> bool {
+    if markdown.is_empty() {
+        return false;
+    }
+    if offset >= markdown.len() {
+        offset = markdown.len().saturating_sub(1);
+    }
+
+    let current_start = markdown[..offset].rfind('\n').map_or(0, |i| i + 1);
+    if current_start == 0 {
+        return false;
+    }
+
+    let prev_end = current_start.saturating_sub(1);
+    let prev_start = markdown[..prev_end].rfind('\n').map_or(0, |i| i + 1);
+    let prev_line = &markdown[prev_start..prev_end];
+    prev_line.trim().is_empty()
+}
+
+fn extract_link_source_from_markdown(markdown: &str, start: usize, fallback_end: usize) -> String {
+    if start >= markdown.len() {
+        return String::new();
+    }
+
+    let tail = &markdown[start..];
+    if let Some(rest) = tail.strip_prefix('<') {
+        if let Some(close) = rest.find('>') {
+            return format!("<{}>", &rest[..close]);
+        }
+    }
+    if let Some(rest) = tail.strip_prefix('[') {
+        if let Some(label_close_rel) = rest.find(']') {
+            let label_close = 1 + label_close_rel;
+            let after = &tail[label_close + 1..];
+            if let Some(after_paren) = after.strip_prefix('(') {
+                if let Some(paren_close_rel) = after_paren.find(')') {
+                    return tail[..label_close + 3 + paren_close_rel].to_string();
+                }
+            }
+            if let Some(after_bracket) = after.strip_prefix('[') {
+                if let Some(ref_close_rel) = after_bracket.find(']') {
+                    return tail[..label_close + 3 + ref_close_rel].to_string();
+                }
+            }
+            return tail[..label_close + 1].to_string();
+        }
+    }
+
+    markdown
+        .get(start..fallback_end)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn extract_image_source_from_markdown(markdown: &str, start: usize, fallback_end: usize) -> String {
+    if start >= markdown.len() {
+        return String::new();
+    }
+    let tail = &markdown[start..];
+    let Some(rest) = tail.strip_prefix("![") else {
+        return markdown
+            .get(start..fallback_end)
+            .unwrap_or_default()
+            .to_string();
+    };
+
+    let Some(label_close_rel) = rest.find(']') else {
+        return markdown
+            .get(start..fallback_end)
+            .unwrap_or_default()
+            .to_string();
+    };
+    let label_close = 2 + label_close_rel; // "![" (2) + rel idx
+    let after = &tail[label_close + 1..];
+    if let Some(after_paren) = after.strip_prefix('(') {
+        if let Some(paren_close_rel) = after_paren.find(')') {
+            return tail[..label_close + 3 + paren_close_rel].to_string();
+        }
+    }
+    if let Some(after_bracket) = after.strip_prefix('[') {
+        if let Some(ref_close_rel) = after_bracket.find(']') {
+            return tail[..label_close + 3 + ref_close_rel].to_string();
+        }
+    }
+    tail[..label_close + 1].to_string()
+}
+
+fn emit_reference_definition_gap_events(
+    markdown: &str,
+    start: usize,
+    end: usize,
+    out: &mut Vec<Event>,
+) {
+    if start >= end || end > markdown.len() {
+        return;
+    }
+    let gap = &markdown[start..end];
+    let gap_lines: Vec<&str> = gap.lines().collect();
+    let def_indexes: Vec<usize> = gap_lines
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| reference_definition_line(line).then_some(idx))
+        .collect();
+    let defs: Vec<&str> = def_indexes
+        .iter()
+        .map(|idx| gap_lines[*idx].trim_end())
+        .collect();
+    if defs.is_empty() {
+        return;
+    }
+
+    let first_def_idx = def_indexes[0];
+    let leading_blank_lines = gap_lines[..first_def_idx]
+        .iter()
+        .rev()
+        .take_while(|line| line.trim().is_empty())
+        .count();
+    if leading_blank_lines > 0 {
+        out.push(Event::InterBlockBlankLines(leading_blank_lines));
+    }
+
+    out.push(Event::Start(Block::Paragraph));
+    for (idx, line) in defs.iter().enumerate() {
+        out.push(Event::Text((*line).to_string()));
+        if idx + 1 < defs.len() {
+            out.push(Event::HardBreak);
+        }
+    }
+    out.push(Event::End(Block::Paragraph));
+}
+
+fn should_emit_inter_block_blank_lines_before_event(
+    event: &MdEvent<'_>,
+    markdown: &str,
+    offset: usize,
+) -> bool {
+    match event {
+        MdEvent::Start(Tag::Paragraph) => paragraph_starts_at_line_indent_only(markdown, offset),
+        MdEvent::Start(
+            Tag::Heading { .. }
+                | Tag::BlockQuote(_)
+                | Tag::CodeBlock(_)
+                | Tag::List(_)
+                | Tag::Table(_)
+                | Tag::FootnoteDefinition(_)
+                | Tag::DefinitionList
+                | Tag::DefinitionListTitle
+                | Tag::DefinitionListDefinition
+                | Tag::HtmlBlock,
+        ) => true,
+        _ => false,
+    }
+}
+
+fn paragraph_starts_at_line_indent_only(markdown: &str, mut offset: usize) -> bool {
+    if markdown.is_empty() {
+        return true;
+    }
+    if offset > markdown.len() {
+        offset = markdown.len();
+    }
+    let line_start = markdown[..offset].rfind('\n').map_or(0, |i| i + 1);
+    markdown[line_start..offset]
+        .chars()
+        .all(|ch| ch == ' ' || ch == '\t')
+}
+
+fn blank_lines_before_offset(markdown: &str, mut offset: usize) -> usize {
+    if markdown.is_empty() || offset == 0 {
+        return 0;
+    }
+    if offset > markdown.len() {
+        offset = markdown.len();
+    }
+
+    let line_start = markdown[..offset].rfind('\n').map_or(0, |i| i + 1);
+    if line_start == 0 {
+        return 0;
+    }
+
+    let mut line_end = line_start.saturating_sub(1);
+    let mut count = 0usize;
+    loop {
+        let prev_start = markdown[..line_end].rfind('\n').map_or(0, |i| i + 1);
+        let prev_line = &markdown[prev_start..line_end];
+        if prev_line.trim().is_empty() {
+            count += 1;
+        } else {
+            break;
         }
 
-        // Return iterator
-        result.into_iter()
-    })
-}
-
-fn detect_thematic_break_markers(markdown: &str) -> Vec<char> {
-    markdown
-        .lines()
-        .filter_map(thematic_break_marker_for_line)
-        .collect()
-}
-
-fn detect_unordered_item_markers(markdown: &str) -> Vec<char> {
-    markdown
-        .lines()
-        .filter_map(unordered_list_marker_for_line)
-        .collect()
+        if prev_start == 0 {
+            break;
+        }
+        line_end = prev_start.saturating_sub(1);
+    }
+    count
 }
 
 fn unordered_list_marker_for_line(line: &str) -> Option<char> {
@@ -304,6 +590,65 @@ fn thematic_break_marker_for_line(line: &str) -> Option<char> {
     }
 }
 
+fn ordered_list_number_for_line(line: &str) -> Option<u64> {
+    let mut s = line;
+
+    loop {
+        let trimmed = s.trim_start();
+        if let Some(rest) = trimmed.strip_prefix('>') {
+            s = rest.trim_start();
+            continue;
+        }
+        s = trimmed;
+        break;
+    }
+
+    let trimmed = s.trim_start();
+    let mut chars = trimmed.chars().peekable();
+    let mut digits = String::new();
+    while let Some(ch) = chars.peek().copied() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+            let _ = chars.next();
+        } else {
+            break;
+        }
+    }
+    if digits.is_empty() || digits.len() > 9 {
+        return None;
+    }
+
+    let delimiter = chars.next()?;
+    if delimiter != '.' && delimiter != ')' {
+        return None;
+    }
+
+    match chars.next() {
+        Some(c) if c == ' ' || c == '\t' => digits.parse::<u64>().ok(),
+        None => digits.parse::<u64>().ok(),
+        _ => None,
+    }
+}
+
+fn reference_definition_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if !trimmed.starts_with('[') {
+        return false;
+    }
+    let Some(close) = trimmed.find(']') else {
+        return false;
+    };
+    let rest = &trimmed[close + 1..];
+    if !rest.starts_with(':') {
+        return false;
+    }
+    let after_colon = rest[1..].trim_start();
+    !after_colon.is_empty()
+}
+
 fn convert_tag(tag: Tag) -> Block {
     match tag {
         Tag::Heading { level, .. } => Block::Heading {
@@ -320,10 +665,11 @@ fn convert_tag(tag: Tag) -> Block {
         Tag::Paragraph => Block::Paragraph,
         Tag::BlockQuote(_) => Block::BlockQuote,
         Tag::CodeBlock(kind) => Block::CodeBlock {
-            info: match kind {
+            info: match &kind {
                 pulldown_cmark::CodeBlockKind::Fenced(info) => Some(info.to_string()),
                 pulldown_cmark::CodeBlockKind::Indented => None,
             },
+            indented: matches!(kind, pulldown_cmark::CodeBlockKind::Indented),
         },
         Tag::List(start) => Block::List { start },
         Tag::Item => Block::ListItem,
@@ -357,7 +703,10 @@ fn convert_tag_end(tag: TagEnd) -> Block {
         }, // Level doesn't matter for End
         TagEnd::Paragraph => Block::Paragraph,
         TagEnd::BlockQuote(_) => Block::BlockQuote,
-        TagEnd::CodeBlock => Block::CodeBlock { info: None },
+        TagEnd::CodeBlock => Block::CodeBlock {
+            info: None,
+            indented: false,
+        },
         TagEnd::List(_) => Block::List { start: None },
         TagEnd::Item => Block::ListItem,
         TagEnd::Table => Block::Table {

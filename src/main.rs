@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 static SIGINT_RECEIVED: AtomicBool = AtomicBool::new(false);
+const HORIZONTAL_PADDING: u16 = 2;
 
 #[cfg(unix)]
 const SIGINT: i32 = 2;
@@ -555,19 +556,19 @@ fn draw_page(
 
     for row in 0..page_size {
         if cache.body_lines.get(row) != body_lines.get(row) {
-            stdout.execute(MoveTo(0, row as u16))?;
+            stdout.execute(MoveTo(HORIZONTAL_PADDING, row as u16))?;
             stdout.execute(Clear(ClearType::CurrentLine))?;
             if let Some(line) = body_lines.get(row) {
-                write!(stdout, "{line}")?;
+                write!(stdout, "\x1b[0m{line}")?;
             }
         }
     }
 
     let footer = build_footer_line(pager, source_label, status_message);
     if cache.footer != footer {
-        stdout.execute(MoveTo(0, page_size as u16))?;
+        stdout.execute(MoveTo(HORIZONTAL_PADDING, page_size as u16))?;
         stdout.execute(Clear(ClearType::CurrentLine))?;
-        write!(stdout, "{footer}")?;
+        write!(stdout, "\x1b[0m{footer}")?;
     }
 
     cache.body_lines = body_lines;
