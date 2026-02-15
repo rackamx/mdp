@@ -92,6 +92,18 @@ Run all tests:
 cargo test
 ```
 
+Get line coverage summary:
+
+```bash
+make coverage
+```
+
+Open HTML coverage report:
+
+```bash
+make coverage-open
+```
+
 Run CommonMark audit tests (ignored by default):
 
 ```bash
