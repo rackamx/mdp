@@ -122,6 +122,14 @@ Run CommonMark audit tests (ignored by default):
 cargo test --test commonmark_spec -- --ignored --nocapture
 ```
 
+## GitHub Workflows
+
+- [CI](.github/workflows/ci.yml): formatting, clippy, and test checks on push/PR.
+- [Coverage](.github/workflows/coverage.yml): enforces coverage gate and uploads coverage artifacts.
+- [Sanitizers](.github/workflows/sanitizers.yml): runs ASAN regression tests.
+- [Security](.github/workflows/security.yml): runs `cargo audit` and `cargo deny`.
+- [Release Check](.github/workflows/release-check.yml): release builds and smoke tests on Linux/macOS.
+
 ## Project Files
 
 - `SPEC.md`: Product specification and implementation plan, including task breakdown and current TODO checklist.
