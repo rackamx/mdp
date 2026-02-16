@@ -10,15 +10,8 @@ ignore = []
 confidence-threshold = 0.8
 allow = [
   "Apache-2.0",
-  "BSD-2-Clause",
-  "BSD-3-Clause",
-  "ISC",
   "MIT",
-  "MPL-2.0",
-  "Unicode-3.0",
-  "Unicode-DFS-2016",
   "Unlicense",
-  "Zlib",
 ]
 
 [bans]
@@ -26,7 +19,7 @@ multiple-versions = "warn"
 wildcards = "allow"
 highlight = "all"
 deny = []
-skip = []
+skip = [{ name = "windows-sys" }]
 skip-tree = []
 
 [sources]
