@@ -126,6 +126,32 @@ Run CommonMark audit tests (ignored by default):
 cargo test --test commonmark_spec -- --ignored --nocapture
 ```
 
+## Architecture and Targeted Testing
+
+Core flow:
+
+- `parse_markdown` (`src/parsing.rs`): converts markdown input into internal events.
+- `Renderer` (`src/rendering.rs`): transforms events into terminal-ready lines.
+- `Pager` (`src/pager.rs`): manages viewport, navigation, and search state over rendered lines.
+- CLI/interactive loop (`src/main.rs`): loads input, builds pager state, handles key events, and draws frames.
+
+Targeted test commands:
+
+```bash
+# Parser behavior
+cargo test --test parsing
+
+# Rendering behavior and formatting fidelity
+cargo test --test rendering
+
+# Pager navigation/search behavior
+cargo test --test pager
+
+# Interactive/TTY behavior
+cargo test --test pty_interactive
+cargo test --test terminal
+```
+
 ## GitHub Workflows
 
 - [CI](.github/workflows/ci.yml): formatting, clippy, and test checks on push/PR.

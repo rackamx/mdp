@@ -630,4 +630,4 @@ After implementing tasks:
 - [ ] Extend `release-check.yml` to create/publish GitHub Releases on `v*` tags with attached binaries and release notes.
 - [ ] Add a performance regression workflow/job that runs benchmark mode and fails on significant regressions.
 - [ ] Expand CI smoke coverage with non-interactive sample runs and a lightweight PTY interactive smoke test.
-- [ ] Add a short architecture/testing section in `README.md` describing parser -> renderer -> pager flow and targeted test commands.
+- [x] Add a short architecture/testing section in `README.md` describing parser -> renderer -> pager flow and targeted test commands.
