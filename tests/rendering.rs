@@ -2082,6 +2082,20 @@ fn test_render_table_fallback() {
     );
 }
 
+#[test]
+fn test_render_table_with_link_uses_visible_width_not_ansi_bytes() {
+    let markdown = "| Link | Text |\n| --- | --- |\n| [test](https://toto.html) | plain |";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(45);
+    let output = renderer.render(&events);
+
+    assert!(
+        output.contains("┌") && output.contains("│") && output.contains("┘"),
+        "Expected bordered table (no fallback) when visible width fits, got: {:?}",
+        output
+    );
+}
+
 /// Test footnote reference rendering
 #[test]
 fn test_render_footnote_reference() {

@@ -345,3 +345,14 @@ Footnote style (extension): reference[^1]
 
 [^1]: Footnote text (extension)
 
+---
+
+## 20. Table Alignment Repro (Link + Text)
+
+| Link Column | Text Column |
+| :---------- | :---------- |
+| [test](https://toto.html) | plain string |
+| [a much longer link label for alignment testing](https://example.com/very/long/path?with=query&and=more) | short |
+| [short](https://example.org) | |
+| [empty-text-cell-check](https://example.net) |  |
+| [test-2](https://toto.html#fragment) | another plain string |

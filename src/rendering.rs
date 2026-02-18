@@ -1449,7 +1449,7 @@ impl Renderer {
         let mut widths = vec![0usize; col_count];
         for row in &self.table_rows {
             for (i, cell) in row.iter().enumerate() {
-                widths[i] = widths[i].max(Self::display_width(cell));
+                widths[i] = widths[i].max(Self::visible_display_width_without_ansi(cell));
             }
         }
         for width in &mut widths {
@@ -1460,7 +1460,7 @@ impl Renderer {
         let row_max_width = self
             .table_rows
             .iter()
-            .map(|row| Self::display_width(&self.table_row_line(row, &widths)))
+            .map(|row| Self::visible_display_width_without_ansi(&self.table_row_line(row, &widths)))
             .max()
             .unwrap_or(0);
         let max_table_width = row_max_width.max(Self::display_width(&separator));
@@ -1490,7 +1490,7 @@ impl Renderer {
         out.push('│');
         for (i, width) in widths.iter().enumerate() {
             let cell = row.get(i).map(String::as_str).unwrap_or("");
-            let cell_w = Self::display_width(cell);
+            let cell_w = Self::visible_display_width_without_ansi(cell);
             let pad = width.saturating_sub(cell_w);
             let alignment = self
                 .table_alignments
