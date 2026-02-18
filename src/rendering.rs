@@ -115,6 +115,14 @@ impl Renderer {
         self.cursor_col += 1;
     }
 
+    fn table_cell_has_visible_content(&self) -> bool {
+        !Self::strip_ansi(&self.current_table_cell).is_empty()
+    }
+
+    fn table_cell_ends_with_visible_space(&self) -> bool {
+        Self::strip_ansi(&self.current_table_cell).ends_with(' ')
+    }
+
     fn block_quote_prefix_string(&self) -> String {
         if self.block_quote_depth == 0 {
             String::new()
@@ -479,7 +487,8 @@ impl Renderer {
 
         if self.in_table_cell {
             for word in processed.split_whitespace() {
-                if !self.current_table_cell.is_empty() && !self.current_table_cell.ends_with(' ') {
+                if self.table_cell_has_visible_content() && !self.table_cell_ends_with_visible_space()
+                {
                     self.current_table_cell.push(' ');
                 }
                 self.current_table_cell.push_str(word);
@@ -567,7 +576,7 @@ impl Renderer {
         }
 
         if self.in_table_cell {
-            if !self.current_table_cell.is_empty() && !self.current_table_cell.ends_with(' ') {
+            if self.table_cell_has_visible_content() && !self.table_cell_ends_with_visible_space() {
                 self.current_table_cell.push(' ');
             }
             return;
@@ -597,7 +606,11 @@ impl Renderer {
     /// Render bold text start (ANSI bold on)
     fn render_bold_start(&mut self) {
         if self.bold_depth == 0 {
-            self.current_line.push_str("\x1b[1m");
+            if self.in_table_cell {
+                self.current_table_cell.push_str("\x1b[1m");
+            } else {
+                self.current_line.push_str("\x1b[1m");
+            }
         }
         self.bold_depth += 1;
     }
@@ -608,14 +621,22 @@ impl Renderer {
             self.bold_depth -= 1;
         }
         if self.bold_depth == 0 {
-            self.current_line.push_str("\x1b[22m");
+            if self.in_table_cell {
+                self.current_table_cell.push_str("\x1b[22m");
+            } else {
+                self.current_line.push_str("\x1b[22m");
+            }
         }
     }
 
     /// Render italics text start (ANSI italics on)
     fn render_italics_start(&mut self) {
         if self.italics_depth == 0 {
-            self.current_line.push_str("\x1b[3m");
+            if self.in_table_cell {
+                self.current_table_cell.push_str("\x1b[3m");
+            } else {
+                self.current_line.push_str("\x1b[3m");
+            }
         }
         self.italics_depth += 1;
     }
@@ -626,7 +647,11 @@ impl Renderer {
             self.italics_depth -= 1;
         }
         if self.italics_depth == 0 {
-            self.current_line.push_str("\x1b[23m");
+            if self.in_table_cell {
+                self.current_table_cell.push_str("\x1b[23m");
+            } else {
+                self.current_line.push_str("\x1b[23m");
+            }
         }
     }
 
@@ -636,7 +661,11 @@ impl Renderer {
         if self.strikethrough_fallback {
             self.in_strikethrough = true;
         } else if self.strikethrough_depth == 1 {
-            self.current_line.push_str("\x1b[9m");
+            if self.in_table_cell {
+                self.current_table_cell.push_str("\x1b[9m");
+            } else {
+                self.current_line.push_str("\x1b[9m");
+            }
         }
     }
 
@@ -648,7 +677,11 @@ impl Renderer {
         if self.strikethrough_fallback {
             self.in_strikethrough = self.strikethrough_depth > 0;
         } else if self.strikethrough_depth == 0 {
-            self.current_line.push_str("\x1b[29m");
+            if self.in_table_cell {
+                self.current_table_cell.push_str("\x1b[29m");
+            } else {
+                self.current_line.push_str("\x1b[29m");
+            }
         }
     }
 

@@ -2126,6 +2126,63 @@ fn test_render_table_with_link_uses_visible_width_not_ansi_bytes() {
     );
 }
 
+#[test]
+fn test_render_table_with_emphasis_does_not_emit_stray_ansi_line() {
+    let markdown = "| A | B |\n| --- | --- |\n| **x** | y |\n\nAfter";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    assert!(
+        !output.contains("\x1b[1m\x1b[22m\n\nAfter"),
+        "Expected no standalone bold on/off line after table, got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("After"),
+        "Expected trailing paragraph to render, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_table_fallback_with_emphasis_does_not_emit_stray_ansi_line() {
+    let markdown = "| VeryLongColumnHeader | AnotherVeryLongColumnHeader |\n| --- | --- |\n| **x** | y |\n\nAfter";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(20);
+    let output = renderer.render(&events);
+
+    assert!(
+        !output.contains("\x1b[1m\x1b[22m\n\nAfter"),
+        "Expected no standalone bold on/off line after fallback table, got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("After"),
+        "Expected trailing paragraph to render, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_table_cell_preserves_inline_emphasis() {
+    let markdown = "| A | B |\n| --- | --- |\n| **x** and *y* | z |";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    assert!(
+        output.contains("\x1b[1mx\x1b[22m"),
+        "Expected bold emphasis to be preserved in table cell, got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("\x1b[3m") && output.contains("y\x1b[23m"),
+        "Expected italic emphasis to be preserved in table cell, got: {:?}",
+        output
+    );
+}
+
 /// Test footnote reference rendering
 #[test]
 fn test_render_footnote_reference() {
