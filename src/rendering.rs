@@ -902,6 +902,22 @@ impl Renderer {
         if self.in_footnote_definition {
             self.current_line.push_str("\x1b[2m");
         }
+        self.reapply_active_inline_styles();
+    }
+
+    fn reapply_active_inline_styles(&mut self) {
+        if self.in_code_block {
+            return;
+        }
+        if self.bold_depth > 0 {
+            self.current_line.push_str("\x1b[1m");
+        }
+        if self.italics_depth > 0 {
+            self.current_line.push_str("\x1b[3m");
+        }
+        if !self.strikethrough_fallback && self.strikethrough_depth > 0 {
+            self.current_line.push_str("\x1b[9m");
+        }
     }
 
     /// Render a horizontal rule

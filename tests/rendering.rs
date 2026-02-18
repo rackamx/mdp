@@ -364,6 +364,36 @@ fn test_render_overlapping_emphasis_keeps_outer_italics_active() {
     );
 }
 
+#[test]
+fn test_render_wrapped_italics_reapplies_style_on_continuation_lines() {
+    let markdown = "*test this very long sentence test this very long sentence test this very long sentence test this very long sentence*";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(40);
+    let output = renderer.render(&events);
+    let lines: Vec<&str> = output.lines().collect();
+
+    assert!(
+        lines.len() > 1,
+        "Expected wrapped output across multiple lines, got: {:?}",
+        output
+    );
+    assert!(
+        lines[0].starts_with("\x1b[3m"),
+        "Expected first wrapped line to start with italics code, got: {:?}",
+        lines[0]
+    );
+    assert!(
+        lines.iter().skip(1).all(|line| line.starts_with("\x1b[3m")),
+        "Expected continuation lines to reapply italics code, got lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.last().is_some_and(|line| line.contains("\x1b[23m")),
+        "Expected final line to close italics style, got lines: {:?}",
+        lines
+    );
+}
+
 /// Test h1 heading rendering
 #[test]
 fn test_render_h1() {
