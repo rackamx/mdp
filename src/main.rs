@@ -150,9 +150,7 @@ fn parse_cli_args(args: &[String]) -> Result<CliOptions, CliParseError> {
                     ));
                 };
                 width_override = Some(value.parse::<usize>().map_err(|_| {
-                    CliParseError::Error(format!(
-                        "error: invalid value '{value}' for '--width'\n"
-                    ))
+                    CliParseError::Error(format!("error: invalid value '{value}' for '--width'\n"))
                 })?);
             }
             "--bench-iters" => {
@@ -349,11 +347,7 @@ fn run_with_env(
     let benchmark_mode = cli.benchmark_mode;
     let bench_iters = cli.bench_iters;
 
-    let loaded = match load_input_with_io(
-        cli.file.as_deref(),
-        app_io.stdin_is_terminal(),
-        app_io,
-    ) {
+    let loaded = match load_input_with_io(cli.file.as_deref(), app_io.stdin_is_terminal(), app_io) {
         Ok(loaded) => loaded,
         Err(InputLoadError::Usage) => {
             app_io.write_stdout("Usage: mdp <file>\n");

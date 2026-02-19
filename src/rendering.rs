@@ -495,7 +495,8 @@ impl Renderer {
 
         if self.in_table_cell {
             for word in processed.split_whitespace() {
-                if self.table_cell_has_visible_content() && !self.table_cell_ends_with_visible_space()
+                if self.table_cell_has_visible_content()
+                    && !self.table_cell_ends_with_visible_space()
                 {
                     self.current_table_cell.push(' ');
                 }
