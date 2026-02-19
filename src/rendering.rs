@@ -215,7 +215,7 @@ impl Renderer {
             heading_text: String::new(),
             in_code_block: false,
             strikethrough_fallback: true,
-            flatten_wide_tables: true,
+            flatten_wide_tables: false,
             in_strikethrough: false,
             bold_depth: 0,
             italics_depth: 0,

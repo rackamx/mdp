@@ -129,9 +129,9 @@ fn build_cli() -> Command {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("no-flatten-wide-tables")
-                .long("no-flatten-wide-tables")
-                .help("Render wide tables with borders instead of flattening to fallback layout")
+            Arg::new("flatten-wide-tables")
+                .long("flatten-wide-tables")
+                .help("Flatten wide tables to fallback layout instead of rendering as wrapped tables")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -278,7 +278,7 @@ fn run_with_env(
     };
     let width_override = matches.get_one::<usize>("width").copied();
     let strikethrough_fallback = !matches.get_flag("ansi-strikethrough");
-    let flatten_wide_tables = !matches.get_flag("no-flatten-wide-tables");
+    let flatten_wide_tables = matches.get_flag("flatten-wide-tables");
     let benchmark_mode = matches.get_flag("benchmark");
     let bench_iters = *matches
         .get_one::<usize>("bench-iters")

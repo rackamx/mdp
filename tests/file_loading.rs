@@ -142,25 +142,51 @@ fn test_width_option() {
 }
 
 #[test]
-fn test_no_flatten_wide_tables_option_keeps_table_borders() {
+fn test_wide_tables_are_default_in_cli_output() {
     let temp_dir = std::env::temp_dir();
-    let test_file = temp_dir.join("mdp_no_flatten_wide_table.md");
+    let test_file = temp_dir.join("mdp_default_wide_table.md");
     let content = "| VeryLongColumnHeader | AnotherVeryLongColumnHeader |\n| --- | --- |\n| ExtremelyLongCellValue | AnotherExtremelyLongCellValue |";
     fs::write(&test_file, content).expect("write table file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_mdp"))
         .arg("--width")
         .arg("20")
-        .arg("--no-flatten-wide-tables")
         .arg(&test_file)
         .output()
-        .expect("run mdp with --no-flatten-wide-tables");
+        .expect("run mdp default wide-table mode");
     fs::remove_file(&test_file).ok();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("┌") && stdout.contains("│") && stdout.contains("┘"),
-        "Expected bordered table with --no-flatten-wide-tables, got: {stdout}"
+        "Expected bordered table by default, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_flatten_wide_tables_option_enables_flattening() {
+    let temp_dir = std::env::temp_dir();
+    let test_file = temp_dir.join("mdp_flatten_wide_table.md");
+    let content = "| VeryLongColumnHeader | AnotherVeryLongColumnHeader |\n| --- | --- |\n| ExtremelyLongCellValue | AnotherExtremelyLongCellValue |";
+    fs::write(&test_file, content).expect("write table file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_mdp"))
+        .arg("--width")
+        .arg("20")
+        .arg("--flatten-wide-tables")
+        .arg(&test_file)
+        .output()
+        .expect("run mdp with --flatten-wide-tables");
+    fs::remove_file(&test_file).ok();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("│"),
+        "Expected flattened (non-bordered) output with --flatten-wide-tables, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("VeryLongColumnHeader"),
+        "Expected flattened output to contain table content, got: {stdout}"
     );
 }
 

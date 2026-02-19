@@ -2112,6 +2112,7 @@ fn test_render_table_fallback() {
     let markdown = "| VeryLongColumnHeader | AnotherVeryLongColumnHeader |\n| --- | --- |\n| ExtremelyLongCellValue | AnotherExtremelyLongCellValue |";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(20);
+    renderer.set_flatten_wide_tables(true);
     let output = renderer.render(&events);
 
     assert!(
@@ -2131,6 +2132,7 @@ fn test_render_table_fallback_uses_structured_row_layout() {
     let markdown = "| | M0 | M1 |\n| --- | --- | --- |\n| Scope | manages one very long area description here | drives another long scope description there |";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(50);
+    renderer.set_flatten_wide_tables(true);
     let output = renderer.render(&events);
 
     assert!(
@@ -2151,11 +2153,10 @@ fn test_render_table_fallback_uses_structured_row_layout() {
 }
 
 #[test]
-fn test_render_table_wide_mode_can_disable_fallback_flattening() {
+fn test_render_wide_table_mode_is_default() {
     let markdown = "| VeryLongColumnHeader | AnotherVeryLongColumnHeader |\n| --- | --- |\n| ExtremelyLongCellValue | AnotherExtremelyLongCellValue |";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(20);
-    renderer.set_flatten_wide_tables(false);
     let output = renderer.render(&events);
 
     assert!(
@@ -2214,6 +2215,7 @@ fn test_render_table_fallback_with_emphasis_does_not_emit_stray_ansi_line() {
     let markdown = "| VeryLongColumnHeader | AnotherVeryLongColumnHeader |\n| --- | --- |\n| **x** | y |\n\nAfter";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(20);
+    renderer.set_flatten_wide_tables(true);
     let output = renderer.render(&events);
 
     assert!(
