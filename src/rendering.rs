@@ -1528,17 +1528,49 @@ impl Renderer {
             return;
         }
 
+        let widths = if max_table_width > self.width {
+            self.fit_table_widths_to_screen(&widths)
+        } else {
+            widths
+        };
+
         let top = self.table_border_line('┌', '┬', '┐', &widths);
         let bottom = self.table_border_line('└', '┴', '┘', &widths);
 
         self.lines.push(top);
         for (idx, row) in self.table_rows.iter().enumerate() {
-            self.lines.push(self.table_row_line(row, &widths));
+            for line in self.table_row_lines(row, &widths) {
+                self.lines.push(line);
+            }
             if idx == 0 {
-                self.lines.push(separator.clone());
+                self.lines.push(self.table_separator_line(&widths));
             }
         }
         self.lines.push(bottom);
+    }
+
+    fn fit_table_widths_to_screen(&self, widths: &[usize]) -> Vec<usize> {
+        if widths.is_empty() {
+            return Vec::new();
+        }
+        let mut fitted = widths.to_vec();
+        let col_count = fitted.len();
+        let target_width = self.width.max(1);
+        let min_col_width = 1usize;
+
+        let mut total_width = 1 + fitted.iter().sum::<usize>() + (3 * col_count);
+        while total_width > target_width {
+            let Some((idx, max_width)) = fitted.iter().enumerate().max_by_key(|(_, w)| **w) else {
+                break;
+            };
+            if *max_width <= min_col_width {
+                break;
+            }
+            fitted[idx] -= 1;
+            total_width -= 1;
+        }
+
+        fitted
     }
 
     fn table_row_line(&self, row: &[String], widths: &[usize]) -> String {
@@ -1570,6 +1602,146 @@ impl Renderer {
             out.push('│');
         }
         out
+    }
+
+    fn table_row_lines(&self, row: &[String], widths: &[usize]) -> Vec<String> {
+        let wrapped_cells: Vec<Vec<String>> = widths
+            .iter()
+            .enumerate()
+            .map(|(i, width)| {
+                let cell = row.get(i).map(String::as_str).unwrap_or("");
+                self.wrap_table_cell_content(cell, *width)
+            })
+            .collect();
+
+        let row_height = wrapped_cells.iter().map(Vec::len).max().unwrap_or(1);
+        let mut lines = Vec::with_capacity(row_height);
+
+        for line_idx in 0..row_height {
+            let mut out = String::new();
+            out.push('│');
+            for (i, width) in widths.iter().enumerate() {
+                let cell = wrapped_cells
+                    .get(i)
+                    .and_then(|parts| parts.get(line_idx))
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let cell_w = Self::visible_display_width_without_ansi(cell);
+                let pad = width.saturating_sub(cell_w);
+                let alignment = self
+                    .table_alignments
+                    .get(i)
+                    .copied()
+                    .unwrap_or(crate::parsing::CellAlignment::Left);
+
+                let (left_pad, right_pad) = match alignment {
+                    crate::parsing::CellAlignment::Right => (pad, 0),
+                    crate::parsing::CellAlignment::Center => (pad / 2, pad - (pad / 2)),
+                    crate::parsing::CellAlignment::None | crate::parsing::CellAlignment::Left => {
+                        (0, pad)
+                    }
+                };
+
+                out.push(' ');
+                out.push_str(&" ".repeat(left_pad));
+                out.push_str(cell);
+                out.push_str(&" ".repeat(right_pad));
+                out.push(' ');
+                out.push('│');
+            }
+            lines.push(out);
+        }
+
+        lines
+    }
+
+    fn split_plain_token_to_width(token: &str, width: usize) -> Vec<String> {
+        if token.is_empty() || width == 0 {
+            return vec![token.to_string()];
+        }
+
+        let mut chunks = Vec::new();
+        let mut current = String::new();
+        let mut current_width = 0usize;
+
+        for ch in token.chars() {
+            let ch_width = Self::char_display_width(ch);
+            if current_width + ch_width > width && !current.is_empty() {
+                chunks.push(current);
+                current = String::new();
+                current_width = 0;
+            }
+            current.push(ch);
+            current_width += ch_width;
+        }
+
+        if !current.is_empty() {
+            chunks.push(current);
+        }
+        if chunks.is_empty() {
+            chunks.push(String::new());
+        }
+
+        chunks
+    }
+
+    fn wrap_table_cell_content(&self, text: &str, width: usize) -> Vec<String> {
+        if width == 0 {
+            return vec![String::new()];
+        }
+
+        let mut lines = Vec::new();
+        let mut line = String::new();
+        let mut line_width = 0usize;
+        let mut has_token = false;
+
+        for token in text.split_whitespace() {
+            let token_width = Self::visible_display_width_without_ansi(token);
+
+            if token_width > width && !token.contains("\x1b[") {
+                if has_token {
+                    lines.push(line);
+                    line = String::new();
+                    line_width = 0;
+                    has_token = false;
+                }
+                let chunks = Self::split_plain_token_to_width(token, width);
+                for (idx, chunk) in chunks.iter().enumerate() {
+                    let chunk_width = Self::visible_display_width_without_ansi(chunk);
+                    if idx + 1 < chunks.len() {
+                        lines.push(chunk.clone());
+                    } else {
+                        line = chunk.clone();
+                        line_width = chunk_width;
+                        has_token = true;
+                    }
+                }
+                continue;
+            }
+
+            if has_token && line_width + 1 + token_width > width {
+                lines.push(line);
+                line = String::new();
+                line_width = 0;
+                has_token = false;
+            }
+
+            if has_token {
+                line.push(' ');
+                line_width += 1;
+            }
+            line.push_str(token);
+            line_width += token_width;
+            has_token = true;
+        }
+
+        if has_token {
+            lines.push(line);
+        } else {
+            lines.push(String::new());
+        }
+
+        lines
     }
 
     fn table_border_line(

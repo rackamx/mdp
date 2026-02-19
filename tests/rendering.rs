@@ -2163,6 +2163,17 @@ fn test_render_table_wide_mode_can_disable_fallback_flattening() {
         "Expected bordered table when wide-table flattening is disabled, got: {:?}",
         output
     );
+    let max_visible_width = output
+        .lines()
+        .map(|line| strip_ansi(line).chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        max_visible_width <= 20,
+        "Expected rendered table lines to fit width=20, got max width {} in {:?}",
+        max_visible_width,
+        output
+    );
 }
 
 #[test]
