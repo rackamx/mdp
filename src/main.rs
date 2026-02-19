@@ -1,4 +1,3 @@
-use clap::{Arg, Command};
 use crossterm::cursor::MoveTo;
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::size as terminal_size;
@@ -101,53 +100,123 @@ fn run() -> i32 {
     run_with_env(&args, &mut io, &mut interactive)
 }
 
-fn build_cli() -> Command {
-    Command::new("mdp")
-        .version(env!("CARGO_PKG_VERSION"))
-        .arg(
-            Arg::new("file")
-                .help("Path to the markdown file to display ('-' for stdin)")
-                .required(false),
-        )
-        .arg(
-            Arg::new("width")
-                .long("width")
-                .value_name("COLUMNS")
-                .value_parser(clap::value_parser!(usize))
-                .help("Override render width"),
-        )
-        .arg(
-            Arg::new("strikethrough-fallback")
-                .long("strikethrough-fallback")
-                .help("Render strikethrough using Unicode combining overlay instead of ANSI")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("ansi-strikethrough")
-                .long("ansi-strikethrough")
-                .help("Render strikethrough using ANSI escape codes instead of Unicode overlay")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("flatten-wide-tables")
-                .long("flatten-wide-tables")
-                .help("Flatten wide tables to fallback layout instead of rendering as wrapped tables")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("benchmark")
-                .long("benchmark")
-                .help("Run a local performance benchmark (parse/render/search) and exit")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("bench-iters")
-                .long("bench-iters")
-                .value_name("N")
-                .value_parser(clap::value_parser!(usize))
-                .default_value("50")
-                .help("Number of benchmark iterations"),
-        )
+#[derive(Debug, Clone)]
+struct CliOptions {
+    file: Option<String>,
+    width_override: Option<usize>,
+    strikethrough_fallback: bool,
+    flatten_wide_tables: bool,
+    benchmark_mode: bool,
+    bench_iters: usize,
+}
+
+enum CliParseError {
+    Help(String),
+    Error(String),
+}
+
+fn help_text(program_name: &str) -> String {
+    format!(
+        "{program_name} {}\n\nUsage: {program_name} [OPTIONS] [file]\n\nOptions:\n  --width COLUMNS              Override render width\n  --strikethrough-fallback     Render strikethrough with Unicode overlay\n  --ansi-strikethrough         Render strikethrough with ANSI escape codes\n  --flatten-wide-tables        Flatten wide tables to fallback layout\n  --benchmark                  Run local benchmark and exit\n  --bench-iters N              Number of benchmark iterations (default: 50)\n  -h, --help                   Show this help message\n  -V, --version                Show version\n",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+fn parse_cli_args(args: &[String]) -> Result<CliOptions, CliParseError> {
+    let program_name = args.first().map(String::as_str).unwrap_or("mdp");
+    let mut file: Option<String> = None;
+    let mut width_override: Option<usize> = None;
+    let mut strikethrough_fallback = true;
+    let mut flatten_wide_tables = false;
+    let mut benchmark_mode = false;
+    let mut bench_iters: usize = 50;
+
+    let mut idx = 1usize;
+    while idx < args.len() {
+        let arg = &args[idx];
+        match arg.as_str() {
+            "-h" | "--help" => return Err(CliParseError::Help(help_text(program_name))),
+            "-V" | "--version" => {
+                return Err(CliParseError::Help(format!(
+                    "{program_name} {}\n",
+                    env!("CARGO_PKG_VERSION")
+                )))
+            }
+            "--width" => {
+                idx += 1;
+                let Some(value) = args.get(idx) else {
+                    return Err(CliParseError::Error(
+                        "error: missing value for '--width'\n".to_string(),
+                    ));
+                };
+                width_override = Some(value.parse::<usize>().map_err(|_| {
+                    CliParseError::Error(format!(
+                        "error: invalid value '{value}' for '--width'\n"
+                    ))
+                })?);
+            }
+            "--bench-iters" => {
+                idx += 1;
+                let Some(value) = args.get(idx) else {
+                    return Err(CliParseError::Error(
+                        "error: missing value for '--bench-iters'\n".to_string(),
+                    ));
+                };
+                bench_iters = value.parse::<usize>().map_err(|_| {
+                    CliParseError::Error(format!(
+                        "error: invalid value '{value}' for '--bench-iters'\n"
+                    ))
+                })?;
+            }
+            "--strikethrough-fallback" => strikethrough_fallback = true,
+            "--ansi-strikethrough" => strikethrough_fallback = false,
+            "--flatten-wide-tables" => flatten_wide_tables = true,
+            "--benchmark" => benchmark_mode = true,
+            "--" => {
+                idx += 1;
+                if idx < args.len() {
+                    if file.is_some() {
+                        return Err(CliParseError::Error(
+                            "error: multiple input files provided\n".to_string(),
+                        ));
+                    }
+                    file = Some(args[idx].clone());
+                }
+                break;
+            }
+            "-" => {
+                if file.is_some() {
+                    return Err(CliParseError::Error(
+                        "error: multiple input files provided\n".to_string(),
+                    ));
+                }
+                file = Some(arg.clone());
+            }
+            _ if arg.starts_with('-') => {
+                return Err(CliParseError::Error(format!(
+                    "error: unexpected argument '{arg}'\n"
+                )))
+            }
+            _ => {
+                if file.is_some() {
+                    return Err(CliParseError::Error(
+                        "error: multiple input files provided\n".to_string(),
+                    ));
+                }
+                file = Some(arg.clone());
+            }
+        }
+        idx += 1;
+    }
+
+    Ok(CliOptions {
+        file,
+        width_override,
+        strikethrough_fallback,
+        flatten_wide_tables,
+        benchmark_mode,
+        bench_iters,
+    })
 }
 
 trait AppIo {
@@ -263,29 +332,25 @@ fn run_with_env(
     app_io: &mut impl AppIo,
     interactive: &mut impl InteractiveRunner,
 ) -> i32 {
-    let matches = match build_cli().try_get_matches_from(args.iter().map(String::as_str)) {
-        Ok(m) => m,
-        Err(e) => {
-            let msg = e.to_string();
-            let code = e.exit_code();
-            if code == 0 {
-                app_io.write_stdout(&msg);
-            } else {
-                app_io.write_stderr(&msg);
-            }
-            return code;
+    let cli = match parse_cli_args(args) {
+        Ok(c) => c,
+        Err(CliParseError::Help(text)) => {
+            app_io.write_stdout(&text);
+            return 0;
+        }
+        Err(CliParseError::Error(text)) => {
+            app_io.write_stderr(&text);
+            return 2;
         }
     };
-    let width_override = matches.get_one::<usize>("width").copied();
-    let strikethrough_fallback = !matches.get_flag("ansi-strikethrough");
-    let flatten_wide_tables = matches.get_flag("flatten-wide-tables");
-    let benchmark_mode = matches.get_flag("benchmark");
-    let bench_iters = *matches
-        .get_one::<usize>("bench-iters")
-        .expect("bench-iters has a default value");
+    let width_override = cli.width_override;
+    let strikethrough_fallback = cli.strikethrough_fallback;
+    let flatten_wide_tables = cli.flatten_wide_tables;
+    let benchmark_mode = cli.benchmark_mode;
+    let bench_iters = cli.bench_iters;
 
     let loaded = match load_input_with_io(
-        matches.get_one::<String>("file").map(String::as_str),
+        cli.file.as_deref(),
         app_io.stdin_is_terminal(),
         app_io,
     ) {
