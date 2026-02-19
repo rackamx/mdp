@@ -491,7 +491,8 @@ impl Renderer {
                 {
                     self.current_table_cell.push(' ');
                 }
-                self.current_table_cell.push_str(word);
+                let rendered_word = Self::underline_plain_url_token(word);
+                self.current_table_cell.push_str(&rendered_word);
             }
             return;
         }
@@ -508,7 +509,8 @@ impl Renderer {
             .unwrap_or(false);
 
         for (idx, word) in processed.split_whitespace().enumerate() {
-            let word_width = Self::display_width(word);
+            let rendered_word = Self::underline_plain_url_token(word);
+            let word_width = Self::display_width(&Self::strip_ansi(&rendered_word));
             let should_have_space_before = if idx == 0 {
                 fragment_has_leading_ws
             } else {
@@ -539,7 +541,7 @@ impl Renderer {
                 self.current_line.push(' ');
                 self.cursor_col += 1;
             }
-            self.current_line.push_str(word);
+            self.current_line.push_str(&rendered_word);
             self.cursor_col += word_width;
         }
 
@@ -1514,10 +1516,7 @@ impl Renderer {
             .unwrap_or(0);
         let max_table_width = row_max_width.max(Self::display_width(&separator));
         if max_table_width > self.width {
-            // Fallback to plain text if table is wider than render width.
-            for row in &self.table_rows {
-                self.lines.push(row.join("  "));
-            }
+            self.flush_table_fallback(col_count);
             return;
         }
 
@@ -1597,6 +1596,102 @@ impl Renderer {
         out
     }
 
+    fn flush_table_fallback(&mut self, col_count: usize) {
+        if self.table_rows.is_empty() || col_count == 0 {
+            return;
+        }
+
+        if self.table_rows.len() == 1 {
+            self.push_wrapped_with_prefix("", &self.table_rows[0].join("  "));
+            return;
+        }
+
+        let headers = self.table_rows[0].clone();
+        let first_header_empty = headers
+            .first()
+            .map(|h| Self::strip_ansi(h).trim().is_empty())
+            .unwrap_or(true);
+        let data_rows: Vec<Vec<String>> = self.table_rows.iter().skip(1).cloned().collect();
+
+        for (row_idx, row) in data_rows.iter().enumerate() {
+            if first_header_empty {
+                if let Some(title) = row.first() {
+                    let title = title.trim();
+                    if !title.is_empty() {
+                        self.push_wrapped_with_prefix("", title);
+                    }
+                }
+                for col in 1..col_count {
+                    let value = row.get(col).map(|c| c.trim()).unwrap_or("");
+                    if value.is_empty() {
+                        continue;
+                    }
+                    let label = headers
+                        .get(col)
+                        .map(|h| Self::strip_ansi(h).trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| format!("Col {col}"));
+                    let prefix = format!("  {label}: ");
+                    self.push_wrapped_with_prefix(&prefix, value);
+                }
+            } else {
+                for col in 0..col_count {
+                    let value = row.get(col).map(|c| c.trim()).unwrap_or("");
+                    if value.is_empty() {
+                        continue;
+                    }
+                    let label = headers
+                        .get(col)
+                        .map(|h| Self::strip_ansi(h).trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| format!("Col {}", col + 1));
+                    let prefix = format!("{label}: ");
+                    self.push_wrapped_with_prefix(&prefix, value);
+                }
+            }
+
+            if row_idx + 1 < data_rows.len() {
+                self.lines.push(String::new());
+            }
+        }
+    }
+
+    fn push_wrapped_with_prefix(&mut self, prefix: &str, text: &str) {
+        let prefix_width = Self::visible_display_width_without_ansi(prefix);
+        let effective_width = self.width.max(prefix_width + 1);
+        let continuation = " ".repeat(prefix_width);
+        let mut line = prefix.to_string();
+        let mut line_width = prefix_width;
+        let mut has_word = false;
+
+        for word in text.split_whitespace() {
+            let rendered_word = Self::underline_plain_url_token(word);
+            let word_width = Self::visible_display_width_without_ansi(&rendered_word);
+
+            if has_word && line_width + 1 + word_width > effective_width {
+                self.lines.push(line);
+                line = continuation.clone();
+                line_width = prefix_width;
+                has_word = false;
+            }
+
+            if has_word {
+                line.push(' ');
+                line_width += 1;
+            }
+
+            line.push_str(&rendered_word);
+            line_width += word_width;
+            has_word = true;
+        }
+
+        if has_word {
+            self.lines.push(line);
+        } else if !prefix.is_empty() {
+            self.lines.push(prefix.trim_end().to_string());
+        }
+    }
+
     fn footnote_separator_line(width: usize) -> String {
         let title = " Footnotes ";
         let min_width = title.chars().count() + 4;
@@ -1625,6 +1720,68 @@ impl Renderer {
 
     fn underline_with_ansi(text: &str) -> String {
         format!("\x1b[4m{text}\x1b[24m")
+    }
+
+    fn looks_like_plain_url(token: &str) -> bool {
+        let lower = token.to_ascii_lowercase();
+        lower.starts_with("http://")
+            || lower.starts_with("https://")
+            || lower.starts_with("ftp://")
+            || lower.starts_with("ftps://")
+            || (lower.starts_with("www.") && token[4..].contains('.'))
+    }
+
+    fn is_url_leading_punctuation(ch: char) -> bool {
+        matches!(ch, '(' | '[' | '{' | '<' | '"' | '\'')
+    }
+
+    fn is_url_trailing_punctuation(ch: char) -> bool {
+        matches!(
+            ch,
+            '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '>' | '"' | '\''
+        )
+    }
+
+    fn underline_plain_url_token(token: &str) -> String {
+        if token.is_empty() || token.contains("\x1b[") {
+            return token.to_string();
+        }
+
+        let mut start = 0usize;
+        for (idx, ch) in token.char_indices() {
+            if Self::is_url_leading_punctuation(ch) {
+                start = idx + ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        let mut end = token.len();
+        for (idx, ch) in token.char_indices().rev() {
+            if idx < start {
+                break;
+            }
+            if Self::is_url_trailing_punctuation(ch) {
+                end = idx;
+            } else {
+                break;
+            }
+        }
+
+        if end <= start {
+            return token.to_string();
+        }
+
+        let core = &token[start..end];
+        if !Self::looks_like_plain_url(core) {
+            return token.to_string();
+        }
+
+        let mut rendered = String::new();
+        rendered.push_str(&token[..start]);
+        rendered.push_str(&Self::underline_with_ansi(core));
+        rendered.push_str(&token[end..]);
+        rendered
     }
 
     fn render_reference_definition_with_underlined_url(text: &str) -> Option<String> {

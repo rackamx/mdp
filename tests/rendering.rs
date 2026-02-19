@@ -1416,6 +1416,20 @@ fn test_render_url_auto_link() {
     );
 }
 
+#[test]
+fn test_render_plain_text_url_is_underlined() {
+    let markdown = "Visit https://example.com/docs for details.";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(120);
+    let output = renderer.render(&events);
+
+    assert!(
+        output.contains("\x1b[4mhttps://example.com/docs\x1b[24m"),
+        "Expected plain-text URL to be underlined, got: {:?}",
+        output
+    );
+}
+
 /// Test email auto-link rendering - <user@example.com> should render once
 #[test]
 fn test_render_email_auto_link() {
@@ -2108,6 +2122,30 @@ fn test_render_table_fallback() {
     assert!(
         !output.contains("│"),
         "Expected plain-text fallback (no table borders) for narrow width, got: {:?}",
+        output
+    );
+}
+
+#[test]
+fn test_render_table_fallback_uses_structured_row_layout() {
+    let markdown = "| | M0 | M1 |\n| --- | --- | --- |\n| Scope | manages one very long area description here | drives another long scope description there |";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(50);
+    let output = renderer.render(&events);
+
+    assert!(
+        !output.contains("│"),
+        "Expected fallback mode (no box borders), got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("Scope"),
+        "Expected row title in structured fallback, got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("M0:") && output.contains("M1:"),
+        "Expected header-keyed fallback entries, got: {:?}",
         output
     );
 }
