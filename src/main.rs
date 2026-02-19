@@ -129,6 +129,12 @@ fn build_cli() -> Command {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("no-flatten-wide-tables")
+                .long("no-flatten-wide-tables")
+                .help("Render wide tables with borders instead of flattening to fallback layout")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("benchmark")
                 .long("benchmark")
                 .help("Run a local performance benchmark (parse/render/search) and exit")
@@ -187,6 +193,7 @@ trait InteractiveRunner {
         markdown: String,
         width_override: Option<usize>,
         strikethrough_fallback: bool,
+        flatten_wide_tables: bool,
         source_label: &str,
         reload_path: Option<&str>,
     ) -> Result<(), io::Error>;
@@ -200,6 +207,7 @@ impl InteractiveRunner for RealInteractiveRunner {
         markdown: String,
         width_override: Option<usize>,
         strikethrough_fallback: bool,
+        flatten_wide_tables: bool,
         source_label: &str,
         reload_path: Option<&str>,
     ) -> Result<(), io::Error> {
@@ -207,6 +215,7 @@ impl InteractiveRunner for RealInteractiveRunner {
             markdown,
             width_override,
             strikethrough_fallback,
+            flatten_wide_tables,
             source_label,
             reload_path,
         )
@@ -269,6 +278,7 @@ fn run_with_env(
     };
     let width_override = matches.get_one::<usize>("width").copied();
     let strikethrough_fallback = !matches.get_flag("ansi-strikethrough");
+    let flatten_wide_tables = !matches.get_flag("no-flatten-wide-tables");
     let benchmark_mode = matches.get_flag("benchmark");
     let bench_iters = *matches
         .get_one::<usize>("bench-iters")
@@ -301,7 +311,13 @@ fn run_with_env(
 
     if benchmark_mode {
         let width = width_override.unwrap_or_else(detect_default_width);
-        let report = run_benchmark(&markdown, width, strikethrough_fallback, bench_iters);
+        let report = run_benchmark(
+            &markdown,
+            width,
+            strikethrough_fallback,
+            flatten_wide_tables,
+            bench_iters,
+        );
         app_io.write_stdout(&format!("{report}\n"));
         return 0;
     }
@@ -311,6 +327,7 @@ fn run_with_env(
             &markdown,
             width_override.unwrap_or_else(detect_default_width),
             strikethrough_fallback,
+            flatten_wide_tables,
         );
         app_io.write_stdout(&format!("{rendered}\n"));
         return 0;
@@ -320,6 +337,7 @@ fn run_with_env(
         markdown,
         width_override,
         strikethrough_fallback,
+        flatten_wide_tables,
         &source_label,
         reload_path.as_deref(),
     ) {
@@ -332,10 +350,16 @@ fn run_with_env(
     }
 }
 
-fn render_markdown(markdown: &str, width: usize, strikethrough_fallback: bool) -> String {
+fn render_markdown(
+    markdown: &str,
+    width: usize,
+    strikethrough_fallback: bool,
+    flatten_wide_tables: bool,
+) -> String {
     let events: Vec<_> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(width);
     renderer.set_strikethrough_fallback(strikethrough_fallback);
+    renderer.set_flatten_wide_tables(flatten_wide_tables);
     renderer.render(&events)
 }
 
@@ -343,10 +367,12 @@ fn render_markdown_lines(
     markdown: &str,
     width: usize,
     strikethrough_fallback: bool,
+    flatten_wide_tables: bool,
 ) -> Vec<String> {
     let events: Vec<_> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(width);
     renderer.set_strikethrough_fallback(strikethrough_fallback);
+    renderer.set_flatten_wide_tables(flatten_wide_tables);
     renderer.render_lines(&events)
 }
 
@@ -354,6 +380,7 @@ fn run_benchmark(
     markdown: &str,
     width: usize,
     strikethrough_fallback: bool,
+    flatten_wide_tables: bool,
     iters: usize,
 ) -> String {
     let iterations = iters.max(1);
@@ -370,6 +397,7 @@ fn run_benchmark(
         let events: Vec<_> = parse_markdown(markdown).collect();
         let mut renderer = Renderer::new(width);
         renderer.set_strikethrough_fallback(strikethrough_fallback);
+        renderer.set_flatten_wide_tables(flatten_wide_tables);
         let lines = renderer.render_lines(&events);
         parse_render_total += t0.elapsed();
         rendered_lines = lines.len();
@@ -586,6 +614,7 @@ fn run_interactive_pager(
     mut markdown: String,
     width_override: Option<usize>,
     strikethrough_fallback: bool,
+    flatten_wide_tables: bool,
     source_label: &str,
     reload_path: Option<&str>,
 ) -> Result<(), io::Error> {
@@ -600,6 +629,7 @@ fn run_interactive_pager(
         &mut markdown,
         width_override,
         strikethrough_fallback,
+        flatten_wide_tables,
         source_label,
         reload_path,
     )
@@ -613,6 +643,7 @@ fn run_interactive_pager_with<T, E, S>(
     markdown: &mut String,
     width_override: Option<usize>,
     strikethrough_fallback: bool,
+    flatten_wide_tables: bool,
     source_label: &str,
     reload_path: Option<&str>,
 ) -> Result<(), io::Error>
@@ -629,6 +660,7 @@ where
         0,
         width_override,
         strikethrough_fallback,
+        flatten_wide_tables,
     );
     let mut status_message: Option<String> = None;
     let mut frame_cache = FrameCache::default();
@@ -658,6 +690,7 @@ where
                     old_scroll,
                     width_override,
                     strikethrough_fallback,
+                    flatten_wide_tables,
                 );
                 frame_cache = FrameCache::default();
                 screen.draw_page(
@@ -711,6 +744,7 @@ where
                         old_scroll,
                         width_override,
                         strikethrough_fallback,
+                        flatten_wide_tables,
                     );
                     status_message = Some("Reloaded".to_string());
                 }
@@ -744,10 +778,16 @@ fn build_pager(
     scroll_position: usize,
     width_override: Option<usize>,
     strikethrough_fallback: bool,
+    flatten_wide_tables: bool,
 ) -> Pager {
     let page_size = rows.saturating_sub(1).max(1);
     let render_width = width_override.unwrap_or_else(|| default_width_for_cols(cols));
-    let rendered_lines = render_markdown_lines(markdown, render_width, strikethrough_fallback);
+    let rendered_lines = render_markdown_lines(
+        markdown,
+        render_width,
+        strikethrough_fallback,
+        flatten_wide_tables,
+    );
     let lines: Vec<String> = if rendered_lines.is_empty() {
         vec![String::new()]
     } else {
@@ -947,7 +987,7 @@ mod tests {
 
     #[test]
     fn test_benchmark_report_has_expected_fields_and_clamps_iterations() {
-        let report = run_benchmark("# heading\n\n- one\n- two\n", 80, true, 0);
+        let report = run_benchmark("# heading\n\n- one\n- two\n", 80, true, true, 0);
         assert!(
             report.contains("Benchmark (mdp)")
                 && report.contains("Iterations: 1")
@@ -960,7 +1000,7 @@ mod tests {
 
     #[test]
     fn test_benchmark_handles_empty_rendered_output_path() {
-        let report = run_benchmark("", 80, true, 1);
+        let report = run_benchmark("", 80, true, true, 1);
         assert!(
             report.contains("Rendered lines: 0"),
             "Expected empty markdown benchmark to report 0 rendered lines: {report}"
@@ -1231,13 +1271,13 @@ mod tests {
 
     #[test]
     fn test_render_markdown_lines_returns_empty_for_empty_input() {
-        let lines = render_markdown_lines("", 80, true);
+        let lines = render_markdown_lines("", 80, true, true);
         assert!(lines.is_empty(), "Expected no lines for empty markdown");
     }
 
     #[test]
     fn test_build_pager_ensures_at_least_one_line_for_empty_input() {
-        let pager = build_pager("", 10, 80, 0, None, true);
+        let pager = build_pager("", 10, 80, 0, None, true, true);
         assert_eq!(
             pager.total_lines(),
             1,
@@ -1419,6 +1459,7 @@ mod tests {
             _markdown: String,
             _width_override: Option<usize>,
             _strikethrough_fallback: bool,
+            _flatten_wide_tables: bool,
             _source_label: &str,
             _reload_path: Option<&str>,
         ) -> Result<(), io::Error> {
@@ -1641,6 +1682,7 @@ mod tests {
             &mut markdown,
             None,
             true,
+            true,
             "spec.md",
             Some("/tmp/spec.md"),
         );
@@ -1675,6 +1717,7 @@ mod tests {
             &mut markdown,
             None,
             true,
+            true,
             "stdin",
             None,
         )
@@ -1707,6 +1750,7 @@ mod tests {
             &mut markdown,
             None,
             true,
+            true,
             "stdin",
             None,
         );
@@ -1737,6 +1781,7 @@ mod tests {
             &mut screen,
             &mut markdown,
             None,
+            true,
             true,
             "stdin",
             None,
@@ -1780,6 +1825,7 @@ mod tests {
             &mut markdown,
             None,
             true,
+            true,
             "stdin",
             None,
         );
@@ -1811,6 +1857,7 @@ mod tests {
             &mut markdown,
             None,
             true,
+            true,
             "stdin",
             None,
         )
@@ -1835,6 +1882,7 @@ mod tests {
             &mut screen,
             &mut markdown,
             None,
+            true,
             true,
             "stdin",
             None,
@@ -1861,6 +1909,7 @@ mod tests {
             &mut screen,
             &mut markdown,
             None,
+            true,
             true,
             "stdin",
             None,
@@ -1889,6 +1938,7 @@ mod tests {
             &mut markdown,
             None,
             true,
+            true,
             "stdin",
             None,
         )
@@ -1916,6 +1966,7 @@ mod tests {
             &mut markdown,
             None,
             true,
+            true,
             "stdin",
             None,
         )
@@ -1942,6 +1993,7 @@ mod tests {
             &mut screen,
             &mut markdown,
             None,
+            true,
             true,
             "stdin",
             None,

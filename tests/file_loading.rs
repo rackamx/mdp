@@ -142,6 +142,29 @@ fn test_width_option() {
 }
 
 #[test]
+fn test_no_flatten_wide_tables_option_keeps_table_borders() {
+    let temp_dir = std::env::temp_dir();
+    let test_file = temp_dir.join("mdp_no_flatten_wide_table.md");
+    let content = "| VeryLongColumnHeader | AnotherVeryLongColumnHeader |\n| --- | --- |\n| ExtremelyLongCellValue | AnotherExtremelyLongCellValue |";
+    fs::write(&test_file, content).expect("write table file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_mdp"))
+        .arg("--width")
+        .arg("20")
+        .arg("--no-flatten-wide-tables")
+        .arg(&test_file)
+        .output()
+        .expect("run mdp with --no-flatten-wide-tables");
+    fs::remove_file(&test_file).ok();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("┌") && stdout.contains("│") && stdout.contains("┘"),
+        "Expected bordered table with --no-flatten-wide-tables, got: {stdout}"
+    );
+}
+
+#[test]
 fn test_help_output() {
     let output = Command::new(env!("CARGO_BIN_EXE_mdp"))
         .arg("--help")

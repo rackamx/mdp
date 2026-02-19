@@ -18,6 +18,8 @@ pub struct Renderer {
     in_code_block: bool,
     /// Whether to use Unicode fallback for strikethrough rendering
     strikethrough_fallback: bool,
+    /// Whether wide tables should be flattened to a fallback layout
+    flatten_wide_tables: bool,
     /// Whether we're currently inside strikethrough span
     in_strikethrough: bool,
     /// Nested bold depth
@@ -213,6 +215,7 @@ impl Renderer {
             heading_text: String::new(),
             in_code_block: false,
             strikethrough_fallback: true,
+            flatten_wide_tables: true,
             in_strikethrough: false,
             bold_depth: 0,
             italics_depth: 0,
@@ -318,6 +321,11 @@ impl Renderer {
     /// Enable or disable Unicode fallback for strikethrough.
     pub fn set_strikethrough_fallback(&mut self, enabled: bool) {
         self.strikethrough_fallback = enabled;
+    }
+
+    /// Enable or disable flatten fallback for tables wider than render width.
+    pub fn set_flatten_wide_tables(&mut self, enabled: bool) {
+        self.flatten_wide_tables = enabled;
     }
 
     /// Combine consecutive Text events into a single Text event.
@@ -1515,7 +1523,7 @@ impl Renderer {
             .max()
             .unwrap_or(0);
         let max_table_width = row_max_width.max(Self::display_width(&separator));
-        if max_table_width > self.width {
+        if max_table_width > self.width && self.flatten_wide_tables {
             self.flush_table_fallback(col_count);
             return;
         }

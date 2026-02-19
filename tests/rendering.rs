@@ -2151,6 +2151,21 @@ fn test_render_table_fallback_uses_structured_row_layout() {
 }
 
 #[test]
+fn test_render_table_wide_mode_can_disable_fallback_flattening() {
+    let markdown = "| VeryLongColumnHeader | AnotherVeryLongColumnHeader |\n| --- | --- |\n| ExtremelyLongCellValue | AnotherExtremelyLongCellValue |";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(20);
+    renderer.set_flatten_wide_tables(false);
+    let output = renderer.render(&events);
+
+    assert!(
+        output.contains("┌") && output.contains("│") && output.contains("┘"),
+        "Expected bordered table when wide-table flattening is disabled, got: {:?}",
+        output
+    );
+}
+
+#[test]
 fn test_render_table_with_link_uses_visible_width_not_ansi_bytes() {
     let markdown = "| Link | Text |\n| --- | --- |\n| [test](https://toto.html) | plain |";
     let events: Vec<Event> = parse_markdown(markdown).collect();
