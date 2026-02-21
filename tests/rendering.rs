@@ -1441,7 +1441,9 @@ fn test_render_keeps_open_paren_with_inline_code_when_wrapping() {
     let lines: Vec<&str> = plain.lines().collect();
 
     assert!(
-        !lines.iter().any(|line| line.ends_with(" (") || line.ends_with("(")),
+        !lines
+            .iter()
+            .any(|line| line.ends_with(" (") || line.ends_with("(")),
         "Expected opening parenthesis to stay attached to inline code on wrap, got: {:?}",
         plain
     );
