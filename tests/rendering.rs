@@ -871,12 +871,35 @@ fn test_render_block_quote_multiline() {
         "Expected 'line three' in output, got: {:?}",
         output
     );
-    // Should have quote prefix for each line
+    // Soft breaks inside a quote paragraph should render inline.
+    let plain = strip_ansi(&output);
+    assert!(
+        plain.contains("line one line two line three"),
+        "Expected quote soft breaks to remain inline, got: {:?}",
+        plain
+    );
+
+    // Quote prefix should still be present.
     let pipe_count = output.matches('│').count();
     assert!(
-        pipe_count >= 3,
-        "Expected at least 3 '│' prefixes in output, got: {}",
+        pipe_count >= 1,
+        "Expected at least 1 '│' prefix in output, got: {}",
         pipe_count
+    );
+}
+
+#[test]
+fn test_render_block_quote_softbreak_stays_inline() {
+    let markdown = "> \"Good abstractions are not vague; they create a level where exact reasoning is possible\n> and concrete decisions stay clear.\"";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(200);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+
+    assert!(
+        plain.contains("where exact reasoning is possible and concrete decisions stay clear."),
+        "Expected block-quote soft break to render inline as a space, got: {:?}",
+        plain
     );
 }
 
@@ -1360,6 +1383,75 @@ fn test_render_reference_definitions_keep_blank_line_after_section_heading() {
     );
 }
 
+#[test]
+fn test_render_wraps_before_inline_code_when_near_line_end() {
+    let markdown = "Task runners only expose what the implementation anticipated. If you have `task_alpha()` and `task_beta()`, the engine can run alpha and beta.";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    assert!(
+        lines.iter().any(|line| line.ends_with("If you have")),
+        "Expected a wrap before inline code span near line end, got: {:?}",
+        plain
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("`task_alpha()` and `task_beta()`,")),
+        "Expected inline-code span to start the continuation line, got: {:?}",
+        plain
+    );
+}
+
+#[test]
+fn test_render_wraps_before_read_file_inline_code_in_tool_vocabulary_sentence() {
+    let markdown = "A fixed command set gives a constrained vocabulary: `alpha_cmd()`, `beta_cmd()`,\n`gamma_cmd()`. Each command has a strict signature.";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.ends_with("`beta_cmd()`,") || line.ends_with("beta_cmd(),")),
+        "Expected first line to wrap after beta_cmd() marker, got: {:?}",
+        plain
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("`gamma_cmd()`. Each command")),
+        "Expected continuation line to start with gamma_cmd() inline code, got: {:?}",
+        plain
+    );
+}
+
+#[test]
+fn test_render_keeps_open_paren_with_inline_code_when_wrapping() {
+    let markdown = "This setup lets you pass a compact callback as a handler. The adapter\n(`_prepare_handler()`) handles the wiring.";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    assert!(
+        !lines.iter().any(|line| line.ends_with(" (") || line.ends_with("(")),
+        "Expected opening parenthesis to stay attached to inline code on wrap, got: {:?}",
+        plain
+    );
+    assert!(
+        plain.contains("(`_prepare_handler()`) handles the wiring."),
+        "Expected parenthesized inline code phrase preserved, got: {:?}",
+        plain
+    );
+}
+
 /// Test image rendering - ![alt](url) should show alt text
 #[test]
 fn test_render_image_alt_text() {
@@ -1428,6 +1520,30 @@ fn test_render_plain_text_url_is_underlined() {
         "Expected plain-text URL to be underlined, got: {:?}",
         output
     );
+}
+
+#[test]
+fn test_render_long_plain_text_url_wraps_without_losing_following_words() {
+    let markdown = "See https://example.com/this/is/a/very/long/url/path/that/previously/overflowed/the/render/width and keep these trailing words visible.";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(40);
+    let output = renderer.render(&events);
+    let plain = strip_combining_marks(&strip_ansi(&output));
+    let normalized = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(
+        normalized.contains("and keep these trailing words visible."),
+        "Expected trailing words after long URL to remain visible, got: {:?}",
+        plain
+    );
+    for line in plain.lines() {
+        assert!(
+            line.chars().count() <= 40,
+            "Expected wrapped line width <= 40, got line {:?} (len={})",
+            line,
+            line.chars().count()
+        );
+    }
 }
 
 /// Test email auto-link rendering - <user@example.com> should render once

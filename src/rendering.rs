@@ -527,38 +527,62 @@ impl Renderer {
             };
             let prev_visible_char = Self::last_visible_char(&self.current_line);
             let token_needs_space = Self::needs_space_before_token(word, prev_visible_char);
-            let needs_leading_space = self.cursor_col > 0
-                && should_have_space_before
-                && !Self::ends_with_visible_space(&self.current_line)
-                && token_needs_space;
 
-            // Check if we need to wrap to a new line
-            if self.cursor_col > 0
-                && self.cursor_col + word_width + usize::from(needs_leading_space) > self.width
-                && needs_leading_space
-            {
-                self.render_newline();
+            let lower_word = word.to_ascii_lowercase();
+            let split_overlong_token = rendered_word.contains("\x1b[4m")
+                || word.contains("://")
+                || lower_word.starts_with("www.");
+
+            let mut chunks: Vec<String> = Vec::new();
+            if self.width > 0 && word_width > self.width && split_overlong_token {
+                let should_underline_chunks = rendered_word.contains("\x1b[4m");
+                for chunk in Self::split_plain_token_to_width(word, self.width) {
+                    if should_underline_chunks {
+                        chunks.push(Self::underline_with_ansi(&chunk));
+                    } else {
+                        chunks.push(chunk);
+                    }
+                }
+            } else {
+                chunks.push(rendered_word);
             }
 
-            // Add word to current line
-            if self.cursor_col > 0
-                && should_have_space_before
-                && !Self::ends_with_visible_space(&self.current_line)
-                && token_needs_space
-                && !Self::ends_with_open_html_tag(&self.current_line)
-            {
-                self.current_line.push(' ');
-                self.cursor_col += 1;
+            let mut first_chunk = true;
+            for (chunk_idx, chunk) in chunks.iter().enumerate() {
+                let chunk_width = Self::display_width(&Self::strip_ansi(chunk));
+                let chunk_needs_space = chunk_idx == 0
+                    && self.cursor_col > 0
+                    && should_have_space_before
+                    && !Self::ends_with_visible_space(&self.current_line)
+                    && token_needs_space
+                    && !Self::ends_with_open_html_tag(&self.current_line);
+                if self.width > 0
+                    && self.cursor_col > 0
+                    && self.cursor_col + chunk_width + usize::from(chunk_needs_space) > self.width
+                {
+                    self.render_newline();
+                }
+                if first_chunk
+                    && self.cursor_col > 0
+                    && should_have_space_before
+                    && !Self::ends_with_visible_space(&self.current_line)
+                    && token_needs_space
+                    && !Self::ends_with_open_html_tag(&self.current_line)
+                {
+                    self.current_line.push(' ');
+                    self.cursor_col += 1;
+                }
+                self.current_line.push_str(chunk);
+                self.cursor_col += chunk_width;
+                first_chunk = false;
             }
-            self.current_line.push_str(&rendered_word);
-            self.cursor_col += word_width;
         }
 
         if fragment_has_trailing_ws && !Self::ends_with_visible_space(&self.current_line) {
             if self.cursor_col >= self.width && self.width > 0 {
                 self.render_newline();
             }
-            if self.cursor_col == 0 || !Self::ends_with_visible_space(&self.current_line) {
+            if self.cursor_col > 0 && !Self::ends_with_visible_space(&self.current_line) {
                 self.current_line.push(' ');
                 self.cursor_col += 1;
             }
@@ -599,16 +623,7 @@ impl Renderer {
             return;
         }
 
-        // Within a block quote, soft breaks become new lines with prefix
-        if self.in_block_quote {
-            // Flush current line
-            if !self.current_line.is_empty() {
-                self.lines.push(self.current_line.clone());
-                self.current_line.clear();
-            }
-            // Add block quote prefix for new line
-            self.push_block_quote_prefix();
-        } else if self.cursor_col > 0 && self.cursor_col < self.width {
+        if self.cursor_col > 0 && self.cursor_col < self.width {
             self.current_line.push(' ');
             self.cursor_col += 1;
         }
@@ -721,6 +736,34 @@ impl Renderer {
             return;
         }
 
+        let needs_space_before = self.cursor_col > 0
+            && !self.current_line.ends_with(' ')
+            && !self.current_line.ends_with('(')
+            && !self.current_line.ends_with('[')
+            && !self.current_line.ends_with('{')
+            && !self.current_line.ends_with('/')
+            && !self.current_line.ends_with('!');
+        let inline_width = (2 * delim.len()) + Self::display_width(&serialized_code);
+        if self.width > 0
+            && self.cursor_col > 0
+            && self.cursor_col + usize::from(needs_space_before) + inline_width >= self.width
+        {
+            let move_open_paren = self.current_line.ends_with('(') && self.cursor_col > 0;
+            if move_open_paren {
+                self.current_line.pop();
+                self.cursor_col -= 1;
+            }
+            while self.current_line.ends_with(' ') && self.cursor_col > 0 {
+                self.current_line.pop();
+                self.cursor_col -= 1;
+            }
+            self.render_newline();
+            if move_open_paren {
+                self.current_line.push('(');
+                self.cursor_col += 1;
+            }
+        }
+
         self.maybe_insert_space_before_inline();
 
         // Add backticks and use faint (dim) for monospace indication
@@ -762,15 +805,13 @@ impl Renderer {
     /// Render a link as "text (url)"
     fn render_link(&mut self, text: &str, url: &str, source: &str) {
         if !source.is_empty() {
-            let rendered = Self::render_link_source_with_underlined_url(source, url);
             if self.in_table_cell {
-                self.current_table_cell.push_str(&rendered);
+                self.current_table_cell.push_str(source);
                 return;
             }
 
             self.maybe_insert_space_before_inline();
-            self.current_line.push_str(&rendered);
-            self.cursor_col += Self::display_width(&Self::strip_ansi(&rendered));
+            self.render_text(source);
             return;
         }
 
@@ -818,45 +859,6 @@ impl Renderer {
             self.current_line.push(')');
             self.cursor_col += 2 + Self::display_width(url); // "(" + url + ")"
         }
-    }
-
-    fn render_link_source_with_underlined_url(source: &str, url: &str) -> String {
-        if source.starts_with("![") {
-            return source.to_string();
-        }
-
-        if source.starts_with('<') && source.ends_with('>') && !url.is_empty() {
-            return format!("<{}>", Self::underline_with_ansi(url));
-        }
-
-        if let Some(open) = source.find("](") {
-            let close = source.rfind(')').unwrap_or(source.len());
-            if close > open + 2 {
-                let inside = &source[open + 2..close];
-                let mut split_at = inside.len();
-                let mut in_quote = false;
-                for (i, ch) in inside.char_indices() {
-                    if ch == '"' {
-                        in_quote = !in_quote;
-                    }
-                    if !in_quote && ch.is_whitespace() {
-                        split_at = i;
-                        break;
-                    }
-                }
-                let link_dest = &inside[..split_at];
-                if !link_dest.is_empty() {
-                    let mut out = String::new();
-                    out.push_str(&source[..open + 2]);
-                    out.push_str(&Self::underline_with_ansi(link_dest));
-                    out.push_str(&inside[split_at..]);
-                    out.push_str(&source[close..]);
-                    return out;
-                }
-            }
-        }
-
-        source.to_string()
     }
 
     /// Render an image preserving source markdown form when available.
