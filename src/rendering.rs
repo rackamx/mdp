@@ -494,6 +494,12 @@ impl Renderer {
         }
 
         if self.in_table_cell {
+            let has_trailing_ws = processed
+                .chars()
+                .last()
+                .map(|c| c.is_whitespace())
+                .unwrap_or(false);
+
             for word in processed.split_whitespace() {
                 if self.table_cell_has_visible_content()
                     && !self.table_cell_ends_with_visible_space()
@@ -502,6 +508,16 @@ impl Renderer {
                 }
                 let rendered_word = Self::underline_plain_url_token(word);
                 self.current_table_cell.push_str(&rendered_word);
+            }
+
+            // split_whitespace() drops trailing (and whitespace-only) spaces.
+            // Preserve them so they land *before* any subsequent emphasis-start
+            // ANSI code rather than being re-inserted inside the italic span.
+            if has_trailing_ws
+                && self.table_cell_has_visible_content()
+                && !self.table_cell_ends_with_visible_space()
+            {
+                self.current_table_cell.push(' ');
             }
             return;
         }

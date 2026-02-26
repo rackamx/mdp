@@ -2367,6 +2367,66 @@ fn test_render_table_cell_preserves_inline_emphasis() {
     );
 }
 
+/// Whitespace between inline code and emphasis in a table cell should not be
+/// swallowed into the italic span — the space must precede the italic-start code.
+#[test]
+fn test_render_table_cell_space_before_emphasis_not_styled() {
+    let markdown = "| A | B |\n| --- | --- |\n| x | `code` *(note)* |";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    // Correct: " \x1b[3m(note)"  —  space THEN italic-on
+    // Wrong:   "\x1b[3m (note)"  —  italic-on THEN space
+    assert!(
+        output.contains(" \x1b[3m(note)"),
+        "Space before emphasis should not be inside italic scope, got: {:?}",
+        output
+    );
+}
+
+/// When a table cell wraps, emphasis must not leak across line boundaries into
+/// padding or table borders.
+#[test]
+fn test_render_table_cell_emphasis_does_not_leak_on_wrap() {
+    // Use a long code span so the cell wraps between it and the emphasis
+    let markdown =
+        "| A | B |\n| --- | --- |\n| x | `LongClassName` *(note)* |";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(25);
+    let output = renderer.render(&events);
+
+    // No line should end with a bare italic-start (\x1b[3m) followed only by
+    // whitespace / border characters — that would leak italic into the border.
+    for line in output.lines() {
+        let stripped = line.replace('│', "").replace(' ', "");
+        assert!(
+            !stripped.ends_with("\x1b[3m"),
+            "Italic-start leaks into table border/padding on line: {:?}",
+            line
+        );
+    }
+}
+
+/// Trailing whitespace in a text fragment before emphasis must not be dropped
+/// by split_whitespace() — the space must land before the italic-start code.
+#[test]
+fn test_render_table_cell_trailing_space_before_emphasis_not_styled() {
+    // "plain text *(note)*" — the trailing space in the text fragment before
+    // emphasis is dropped by split_whitespace(), causing the same bug as with
+    // whitespace-only fragments.
+    let markdown = "| A | B |\n| --- | --- |\n| x | plain text *(note)* |";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(80);
+    let output = renderer.render(&events);
+
+    assert!(
+        output.contains("text \x1b[3m(note)"),
+        "Trailing space before emphasis should not be inside italic scope, got: {:?}",
+        output
+    );
+}
+
 /// Test footnote reference rendering
 #[test]
 fn test_render_footnote_reference() {
