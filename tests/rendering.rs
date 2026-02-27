@@ -2390,8 +2390,7 @@ fn test_render_table_cell_space_before_emphasis_not_styled() {
 #[test]
 fn test_render_table_cell_emphasis_does_not_leak_on_wrap() {
     // Use a long code span so the cell wraps between it and the emphasis
-    let markdown =
-        "| A | B |\n| --- | --- |\n| x | `LongClassName` *(note)* |";
+    let markdown = "| A | B |\n| --- | --- |\n| x | `LongClassName` *(note)* |";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(25);
     let output = renderer.render(&events);
@@ -2399,7 +2398,7 @@ fn test_render_table_cell_emphasis_does_not_leak_on_wrap() {
     // No line should end with a bare italic-start (\x1b[3m) followed only by
     // whitespace / border characters — that would leak italic into the border.
     for line in output.lines() {
-        let stripped = line.replace('│', "").replace(' ', "");
+        let stripped = line.replace(['│', ' '], "");
         assert!(
             !stripped.ends_with("\x1b[3m"),
             "Italic-start leaks into table border/padding on line: {:?}",
