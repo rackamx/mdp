@@ -2430,8 +2430,7 @@ fn test_render_table_cell_trailing_space_before_emphasis_not_styled() {
 /// adjacent columns, and must be re-applied on continuation lines.
 #[test]
 fn test_render_table_cell_bold_does_not_leak_across_columns_on_wrap() {
-    let markdown =
-        "| A | B |\n| --- | --- |\n| **Bold text that wraps to next line** | plain |";
+    let markdown = "| A | B |\n| --- | --- |\n| **Bold text that wraps to next line** | plain |";
     let events: Vec<Event> = parse_markdown(markdown).collect();
     let mut renderer = Renderer::new(40);
     let output = renderer.render(&events);
