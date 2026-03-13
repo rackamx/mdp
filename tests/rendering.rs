@@ -2426,6 +2426,50 @@ fn test_render_table_cell_trailing_space_before_emphasis_not_styled() {
     );
 }
 
+/// Bold text in a table cell that wraps across lines must not leak into
+/// adjacent columns, and must be re-applied on continuation lines.
+#[test]
+fn test_render_table_cell_bold_does_not_leak_across_columns_on_wrap() {
+    let markdown =
+        "| A | B |\n| --- | --- |\n| **Bold text that wraps to next line** | plain |";
+    let events: Vec<Event> = parse_markdown(markdown).collect();
+    let mut renderer = Renderer::new(40);
+    let output = renderer.render(&events);
+
+    for line in output.lines() {
+        // After each bold cell, a reset (\x1b[0m) must appear before
+        // the next column border, so bold never leaks into "plain".
+        if line.contains("plain") {
+            // The word "plain" must not be inside a bold span.
+            // Check that there is no active \x1b[1m without a subsequent
+            // reset before "plain".
+            let idx = line.find("plain").unwrap();
+            let before = &line[..idx];
+            let last_bold_on = before.rfind("\x1b[1m");
+            let last_reset = before.rfind("\x1b[0m").or_else(|| before.rfind("\x1b[22m"));
+            if let Some(bold_pos) = last_bold_on {
+                assert!(
+                    last_reset.is_some_and(|r| r > bold_pos),
+                    "Bold leaks into adjacent column on line: {:?}",
+                    line
+                );
+            }
+        }
+    }
+
+    // The continuation line (containing only "line" from the wrapped bold text)
+    // must still be bold (re-applied \x1b[1m before it)
+    let continuation = output
+        .lines()
+        .find(|l| l.contains("\x1b[1mline\x1b[22m"))
+        .expect("should have a continuation line with bold 'line'");
+    assert!(
+        continuation.contains("\x1b[1mline"),
+        "Bold should be re-applied on continuation line: {:?}",
+        continuation
+    );
+}
+
 /// Test footnote reference rendering
 #[test]
 fn test_render_footnote_reference() {

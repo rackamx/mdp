@@ -1636,6 +1636,9 @@ impl Renderer {
         let row_height = wrapped_cells.iter().map(Vec::len).max().unwrap_or(1);
         let mut lines = Vec::with_capacity(row_height);
 
+        // Track active ANSI state for each cell across visual lines
+        let mut cell_states: Vec<String> = vec![String::new(); widths.len()];
+
         for line_idx in 0..row_height {
             let mut out = String::new();
             out.push('│');
@@ -1663,7 +1666,26 @@ impl Renderer {
 
                 out.push(' ');
                 out.push_str(&" ".repeat(left_pad));
-                out.push_str(cell);
+
+                if !cell.is_empty() {
+                    // Re-apply ANSI state carried over from the previous wrapped line
+                    let carry = std::mem::take(&mut cell_states[i]);
+                    if !carry.is_empty() {
+                        out.push_str(&carry);
+                    }
+                    out.push_str(cell);
+                    // Compute state active at end of this cell line
+                    let full = format!("{}{}", carry, cell);
+                    let has_ansi = !carry.is_empty() || cell.contains("\x1b[");
+                    cell_states[i] = Self::extract_active_ansi_state(&full);
+                    // Reset ANSI to prevent leaking into adjacent cells / padding
+                    if has_ansi {
+                        out.push_str("\x1b[0m");
+                    }
+                } else {
+                    cell_states[i] = String::new();
+                }
+
                 out.push_str(&" ".repeat(right_pad));
                 out.push(' ');
                 out.push('│');
@@ -2081,6 +2103,75 @@ impl Renderer {
         }
 
         cleaned
+    }
+
+    /// Returns the ANSI SGR codes needed to re-establish the formatting state
+    /// that is active at the end of `text`.
+    fn extract_active_ansi_state(text: &str) -> String {
+        let mut bold = false;
+        let mut dim = false;
+        let mut italic = false;
+        let mut strikethrough = false;
+        let mut reverse = false;
+
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' && chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                let mut param = String::new();
+                for c in chars.by_ref() {
+                    if c.is_ascii_digit() || c == ';' {
+                        param.push(c);
+                    } else {
+                        if c == 'm' {
+                            for code in param.split(';') {
+                                match code {
+                                    "0" => {
+                                        bold = false;
+                                        dim = false;
+                                        italic = false;
+                                        strikethrough = false;
+                                        reverse = false;
+                                    }
+                                    "1" => bold = true,
+                                    "2" => dim = true,
+                                    "3" => italic = true,
+                                    "7" => reverse = true,
+                                    "9" => strikethrough = true,
+                                    "22" => {
+                                        bold = false;
+                                        dim = false;
+                                    }
+                                    "23" => italic = false,
+                                    "27" => reverse = false,
+                                    "29" => strikethrough = false,
+                                    _ => {}
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        let mut state = String::new();
+        if bold {
+            state.push_str("\x1b[1m");
+        }
+        if dim {
+            state.push_str("\x1b[2m");
+        }
+        if italic {
+            state.push_str("\x1b[3m");
+        }
+        if reverse {
+            state.push_str("\x1b[7m");
+        }
+        if strikethrough {
+            state.push_str("\x1b[9m");
+        }
+        state
     }
 
     fn is_quote_prefix_only(text: &str) -> bool {
